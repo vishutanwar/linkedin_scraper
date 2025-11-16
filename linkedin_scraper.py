@@ -503,7 +503,12 @@ class LinkedInScraper:
                     pass
             
             # Extract poster name
+            # Based on LinkedIn's current structure: name is in update-components-actor__title
             name_selectors = [
+                'span.update-components-actor__title span[dir="ltr"]',  # Most specific - matches the HTML structure
+                'span.update-components-actor__title',  # Fallback to title span
+                'a.update-components-actor__meta-link span.update-components-actor__title',  # Via meta link
+                'span[class*="update-components-actor__title"]',  # Class contains
                 'span[class*="feed-shared-actor__name"]',
                 'a[class*="feed-shared-actor__name-link"]',
                 'span[class*="update-components-actor__name"]',
@@ -517,14 +522,54 @@ class LinkedInScraper:
                     name_elem = post_element.query_selector(selector)
                     if name_elem:
                         name = name_elem.inner_text().strip()
+                        # Clean up the name - remove extra whitespace and hidden text artifacts
                         if name:
-                            post_data['name'] = name
-                            break
+                            # Sometimes LinkedIn has hidden text, try to get visible text only
+                            # Check if there's a span with aria-hidden="true" that has the actual name
+                            try:
+                                visible_name_elem = name_elem.query_selector('span[aria-hidden="true"]')
+                                if visible_name_elem:
+                                    visible_name = visible_name_elem.inner_text().strip()
+                                    if visible_name and len(visible_name) > 0:
+                                        name = visible_name
+                            except:
+                                pass
+                            
+                            # Filter out very short or non-name text
+                            if name and len(name) > 1 and len(name) < 100:  # Names are usually 1-100 chars
+                                # Remove common non-name patterns
+                                if not name.lower().startswith(('view', 'follow', '•', 'ago', 'minute', 'hour', 'day')):
+                                    post_data['name'] = name
+                                    break
                 except:
                     continue
             
+            # If still no name found, try getting text from the actor container link's aria-label
+            if not post_data['name']:
+                try:
+                    actor_link = post_element.query_selector('a.update-components-actor__meta-link')
+                    if actor_link:
+                        aria_label = actor_link.get_attribute('aria-label')
+                        if aria_label:
+                            # aria-label format: "View: Sirazul Haque 3rd+ ..."
+                            # Extract name part (usually after "View: " and before connection info)
+                            if 'View:' in aria_label:
+                                name_part = aria_label.split('View:')[1].strip()
+                                # Remove connection info (like "3rd+", "2nd", etc.)
+                                name_part = name_part.split('•')[0].strip() if '•' in name_part else name_part
+                                name_part = name_part.split('1st')[0].strip() if '1st' in name_part else name_part
+                                name_part = name_part.split('2nd')[0].strip() if '2nd' in name_part else name_part
+                                name_part = name_part.split('3rd')[0].strip() if '3rd' in name_part else name_part
+                                if name_part and len(name_part) > 1 and len(name_part) < 100:
+                                    post_data['name'] = name_part
+                except:
+                    pass
+            
             # Extract profile link
             profile_link_selectors = [
+                'a.update-components-actor__meta-link',  # Most specific - matches current LinkedIn structure
+                'a[class*="update-components-actor__meta-link"]',  # Class contains
+                'a.update-components-actor__image',  # Profile image link
                 'a[class*="feed-shared-actor__name-link"]',
                 'a[data-control-name="actor_container"]',
                 'a[class*="update-components-actor__container"]',
@@ -538,10 +583,11 @@ class LinkedInScraper:
                     if link_elem:
                         href = link_elem.get_attribute('href')
                         if href and ('/in/' in href or '/company/' in href):
+                            # Clean up the URL - remove query params and fragments
                             if href.startswith('/'):
-                                post_data['profile_link'] = f"https://www.linkedin.com{href.split('?')[0]}"
+                                post_data['profile_link'] = f"https://www.linkedin.com{href.split('?')[0].split('#')[0]}"
                             else:
-                                post_data['profile_link'] = href.split('?')[0]  # Remove query params
+                                post_data['profile_link'] = href.split('?')[0].split('#')[0]  # Remove query params and fragments
                             break
                 except:
                     continue
