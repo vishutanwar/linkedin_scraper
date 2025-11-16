@@ -268,6 +268,10 @@ class LinkedInScraper:
                         print("Could not check URL. Continuing anyway...")
                         navigation_success = True  # Continue to try scrolling
                 
+                # Check for account selection/login page and handle it
+                print("Checking for account selection/login page...")
+                self._handle_account_selection(page)
+                
                 # Wait for page to settle
                 print("Waiting for page content to load...")
                 time.sleep(5)
@@ -359,6 +363,207 @@ class LinkedInScraper:
                         print("Browser closed")
                 except:
                     pass
+    
+    def _handle_account_selection(self, page: Page) -> bool:
+        """
+        Handle LinkedIn account selection/login page if present.
+        Automatically clicks on the first available account.
+        
+        Args:
+            page: Playwright page object
+            
+        Returns:
+            True if account was selected, False otherwise
+        """
+        try:
+            time.sleep(2)  # Wait for page to load
+            current_url = page.url
+            page_title = page.title().lower()
+            
+            # Check if we're on account selection/login page
+            is_account_selection = (
+                'checkpoint' in current_url.lower() or
+                'login' in current_url.lower() or
+                'login' in page_title or
+                'sign in' in page_title or
+                'welcome back' in page_title
+            )
+            
+            if is_account_selection:
+                print("\n" + "="*60)
+                print("⚠️  ACCOUNT SELECTION PAGE DETECTED")
+                print("="*60)
+                print(f"Current URL: {current_url}")
+                print(f"Page title: {page_title}")
+                print("Attempting to automatically select account...")
+                
+                # Wait a bit for the page to fully render
+                time.sleep(3)
+                
+                # Strategy 1: Look for the main account selection element
+                # LinkedIn shows the primary account as a large clickable card/button
+                account_found = False
+                
+                # Try specific LinkedIn selectors first
+                specific_selectors = [
+                    'button[data-test-id*="account"]',  # LinkedIn test IDs
+                    'div[data-test-id*="account"]',
+                    'button:has-text("Vishu")',  # Try to find by name if visible
+                    'div:has-text("Vishu")',
+                ]
+                
+                for selector in specific_selectors:
+                    try:
+                        elements = page.query_selector_all(selector)
+                        if elements:
+                            for elem in elements[:1]:  # Try first element only
+                                try:
+                                    if elem.is_visible():
+                                        print(f"Found account element using selector: {selector}")
+                                        elem.scroll_into_view_if_needed()
+                                        time.sleep(1)
+                                        elem.click()
+                                        print("✅ Clicked account element")
+                                        account_found = True
+                                        time.sleep(3)
+                                        break
+                                except:
+                                    continue
+                            if account_found:
+                                break
+                    except:
+                        continue
+                
+                # If specific selectors didn't work, try generic approach
+                if not account_found:
+                    # Get all buttons and divs with role="button"
+                    clickables = page.query_selector_all('button, div[role="button"], a[href*="checkpoint"]')
+                    # Filter to find the main account selector (usually the first large one)
+                    for elem in clickables:
+                        try:
+                            if elem.is_visible():
+                                text = elem.inner_text().strip().lower()
+                                # Skip "Sign in using another account" and navigation elements
+                                if (text and 
+                                    'another account' not in text and 
+                                    'sign in using' not in text and
+                                    'join now' not in text and
+                                    len(text) > 0):
+                                    # Check element size - account cards are usually larger
+                                    box = elem.bounding_box()
+                                    if box and box['height'] > 50:  # Account cards are usually tall
+                                        print(f"Found large clickable element (likely account card). Clicking...")
+                                        elem.scroll_into_view_if_needed()
+                                        time.sleep(1)
+                                        elem.click()
+                                        print("✅ Clicked account element")
+                                        account_found = True
+                                        time.sleep(3)
+                                        break
+                        except:
+                            continue
+                
+                # Strategy 2: Look for the main account card/button (usually the first large clickable element)
+                if not account_found:
+                    try:
+                        print("Trying alternative: Looking for main account card...")
+                        # LinkedIn account selection usually has a main card with the account info
+                        # Look for elements containing profile info that are clickable
+                        account_cards = page.query_selector_all('div[class*="account"], div[class*="identity"], div[class*="profile-card"]')
+                        for card in account_cards:
+                            try:
+                                if card.is_visible():
+                                    # Check if it has clickable children or is itself clickable
+                                    clickable = card.query_selector('button, a, [role="button"]')
+                                    if not clickable:
+                                        # Try clicking the card itself if it's interactive
+                                        try:
+                                            card.scroll_into_view_if_needed()
+                                            time.sleep(1)
+                                            card.click()
+                                            print("✅ Clicked account card")
+                                            account_found = True
+                                            time.sleep(3)
+                                            break
+                                        except:
+                                            pass
+                                    else:
+                                        clickable.scroll_into_view_if_needed()
+                                        time.sleep(1)
+                                        clickable.click()
+                                        print("✅ Clicked account via card button")
+                                        account_found = True
+                                        time.sleep(3)
+                                        break
+                            except:
+                                continue
+                    except:
+                        pass
+                
+                # Strategy 3: Look for any clickable element that's not "Sign in using another account"
+                if not account_found:
+                    try:
+                        print("Trying alternative: Looking for main account button...")
+                        # Get all clickable elements
+                        clickables = page.query_selector_all('button, a, div[role="button"], [onclick]')
+                        for elem in clickables:
+                            try:
+                                if elem.is_visible():
+                                    text = elem.inner_text().strip().lower()
+                                    # Skip "Sign in using another account" and similar
+                                    if text and 'another account' not in text and 'sign in using' not in text:
+                                        # Check if it looks like an account selector (has some text but not too much)
+                                        if len(text) > 0 and len(text) < 200:
+                                            print(f"Found clickable element: {text[:50]}... Clicking...")
+                                            elem.scroll_into_view_if_needed()
+                                            time.sleep(1)
+                                            elem.click()
+                                            print("✅ Clicked element")
+                                            account_found = True
+                                            time.sleep(3)
+                                            break
+                            except:
+                                continue
+                    except:
+                        pass
+                
+                if account_found:
+                    # Wait for navigation away from login page
+                    print("Waiting for navigation after account selection...")
+                    for i in range(10):  # Wait up to 10 seconds
+                        time.sleep(1)
+                        new_url = page.url
+                        new_title = page.title().lower()
+                        if ('checkpoint' not in new_url.lower() and 
+                            'login' not in new_url.lower() and
+                            'login' not in new_title and
+                            'sign in' not in new_title):
+                            print(f"✅ Successfully navigated away from login page!")
+                            print(f"New URL: {new_url}")
+                            return True
+                    print("⚠️  Still on login page after click. Waiting 5 more seconds...")
+                    time.sleep(5)
+                else:
+                    print("⚠️  Could not automatically select account.")
+                    print("Please manually click on your account in the browser window.")
+                    print("Waiting 15 seconds for manual selection...")
+                    # Wait for manual selection
+                    initial_url = page.url
+                    for i in range(15):
+                        time.sleep(1)
+                        current_url = page.url
+                        if current_url != initial_url and 'checkpoint' not in current_url.lower():
+                            print("✅ Account selected manually!")
+                            return True
+                    print("⚠️  Timeout waiting for account selection.")
+                
+                print("="*60 + "\n")
+                return account_found
+                
+        except Exception as e:
+            print(f"Error handling account selection: {str(e)}")
+            print("Continuing anyway...")
+            return False
     
     def _extract_posts(self, page: Page) -> List[Dict]:
         """
