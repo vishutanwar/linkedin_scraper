@@ -30,13 +30,27 @@ python3 -m venv venv
 source venv/bin/activate
 ```
 
-**On Windows:**
-```bash
+**On Windows (Command Prompt):**
+```cmd
 # Create a virtual environment
 python -m venv venv
 
 # Activate the virtual environment
-venv\Scripts\activate
+venv\Scripts\activate.bat
+```
+
+**On Windows (PowerShell):**
+```powershell
+# Create a virtual environment
+python -m venv venv
+
+# Activate the virtual environment
+venv\Scripts\Activate.ps1
+```
+
+**Note:** If you get an execution policy error in PowerShell, run:
+```powershell
+Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
 ```
 
 You should see `(venv)` in your terminal prompt, indicating the virtual environment is active.
@@ -62,7 +76,10 @@ When you're finished working, you can deactivate the virtual environment:
 deactivate
 ```
 
-**Note:** Remember to activate the virtual environment (`source venv/bin/activate` on macOS/Linux) each time you want to use the scraper.
+**Note:** Remember to activate the virtual environment each time you want to use the scraper:
+- macOS/Linux: `source venv/bin/activate`
+- Windows CMD: `venv\Scripts\activate.bat`
+- Windows PowerShell: `venv\Scripts\Activate.ps1`
 
 ## Getting LinkedIn Cookies
 
@@ -191,8 +208,10 @@ python linkedin_scraper.py "https://www.linkedin.com/search/results/content/?key
 
 ## Notes
 
+- **Cross-Platform Compatibility**: The scraper works on Windows, macOS, and Linux. It automatically detects your OS and uses appropriate user agents.
 - **macOS Compatibility**: The scraper uses Firefox by default in non-headless mode for better stability on macOS. Chromium may crash in non-headless mode on some macOS systems, so Firefox is preferred.
-- **Avoiding Detection**: Running with a visible browser window (default) helps avoid LinkedIn's bot detection. The scraper uses realistic browser settings and user agents.
+- **Windows Compatibility**: Works perfectly on Windows. Uses Firefox by default, but will fall back to Chromium if Firefox fails. User agents are automatically set for Windows.
+- **Avoiding Detection**: Running with a visible browser window (default) helps avoid LinkedIn's bot detection. The scraper uses realistic browser settings and OS-appropriate user agents.
 - **Rate Limiting**: Be respectful of LinkedIn's servers. Don't scrape too aggressively.
 - **Terms of Service**: Ensure your usage complies with LinkedIn's Terms of Service.
 - **Cookie Expiration**: Cookies expire after some time. You may need to refresh them periodically.

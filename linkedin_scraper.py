@@ -12,6 +12,7 @@ Scrapes LinkedIn posts from search results and extracts:
 import json
 import sys
 import time
+import platform
 from typing import List, Dict, Optional
 from playwright.sync_api import sync_playwright, Browser, Page, Cookie
 
@@ -195,11 +196,22 @@ class LinkedInScraper:
             try:
                 # Create browser context
                 print("Creating browser context...")
-                # Set appropriate user agent based on browser type
+                # Set appropriate user agent based on browser type and OS
+                os_name = platform.system().lower()
                 if browser_type == 'firefox':
-                    user_agent = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:109.0) Gecko/20100101 Firefox/119.0'
-                else:
-                    user_agent = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+                    if os_name == 'windows':
+                        user_agent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/119.0'
+                    elif os_name == 'linux':
+                        user_agent = 'Mozilla/5.0 (X11; Linux x86_64; rv:109.0) Gecko/20100101 Firefox/119.0'
+                    else:  # macOS
+                        user_agent = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:109.0) Gecko/20100101 Firefox/119.0'
+                else:  # Chromium
+                    if os_name == 'windows':
+                        user_agent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+                    elif os_name == 'linux':
+                        user_agent = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+                    else:  # macOS
+                        user_agent = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
                 
                 context = browser.new_context(
                     user_agent=user_agent,
