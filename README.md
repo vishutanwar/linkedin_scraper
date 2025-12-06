@@ -1,6 +1,10 @@
-# LinkedIn Post Scraper
+# LinkedIn Scraper API
 
-A Python tool to scrape LinkedIn posts from search results pages. Extracts post text, job application links, profile links, images, and poster names.
+A FastAPI REST API service for scraping LinkedIn posts from search results. Extracts post text, job application links, profile links, images, and poster names.
+
+## 🚀 Quick Deployment
+
+See [DEPLOYMENT_QUICKSTART.md](DEPLOYMENT_QUICKSTART.md) for quick deployment steps, or [DEPLOY.md](DEPLOY.md) for detailed instructions.
 
 ## Features
 
@@ -205,6 +209,248 @@ python linkedin_scraper.py "https://www.linkedin.com/search/results/content/?key
   --cookies cookies.json \
   --headless
 ```
+
+## API Usage
+
+The scraper can also be run as a REST API service using FastAPI. This allows you to deploy it on a server and make HTTP requests to scrape LinkedIn posts.
+
+### Starting the API Server
+
+```bash
+# Activate virtual environment first
+source venv/bin/activate  # macOS/Linux
+# or
+venv\Scripts\activate  # Windows
+
+# Set your API key (optional, defaults to "your-secret-api-key-change-this")
+export LINKEDIN_SCRAPER_API_KEY="your-secret-api-key-here"
+
+# Start the API server
+python api.py
+```
+
+Or using uvicorn directly:
+
+```bash
+# Set API key
+export LINKEDIN_SCRAPER_API_KEY="your-secret-api-key-here"
+
+# Start server
+uvicorn api:app --host 0.0.0.0 --port 8000
+```
+
+The API will be available at `http://localhost:8000`. You can access:
+- API documentation: `http://localhost:8000/docs` (Swagger UI)
+- Alternative docs: `http://localhost:8000/redoc`
+- OpenAPI schema: `http://localhost:8000/openapi.json`
+
+### Authentication
+
+The API uses API key authentication for security. All requests to the `/scrape` endpoint require a valid API key in the `X-API-Key` header.
+
+**Configuration:**
+- Set the `LINKEDIN_SCRAPER_API_KEY` environment variable to your desired API key
+- Default API key is `your-secret-api-key-change-this` (change this in production!)
+- To disable authentication for development, set `LINKEDIN_SCRAPER_AUTH_ENABLED=false`
+
+**Note:** The `/health` endpoint does not require authentication.
+
+### API Endpoints
+
+#### POST `/scrape`
+
+Scrape LinkedIn posts from a given URL.
+
+**Authentication:** Required - Include `X-API-Key` header with your API key.
+
+**Request Headers:**
+- `X-API-Key`: Your API key (required)
+- `Content-Type`: `application/json`
+
+**Request Body:**
+```json
+{
+  "url": "https://www.linkedin.com/search/results/content/?keywords=python",
+  "max_scroll": 5,
+  "scroll_delay": 2,
+  "headless": false,
+  "cookies_file": "linkedin_cookies.json"
+}
+```
+
+**Parameters:**
+- `url` (required): LinkedIn search results URL to scrape
+- `max_scroll` (optional): Maximum number of scrolls (default: 5, range: 1-50)
+- `scroll_delay` (optional): Delay between scrolls in seconds (default: 2, range: 1-10)
+- `headless` (optional): Run browser in headless mode (default: false)
+- `cookies_file` (optional): Path to cookies JSON file on server (default: "linkedin_cookies.json")
+
+**Note:** Cookies are loaded from a local JSON file on the server. The `linkedin_cookies.json` file must be present in the application directory. You can specify a different file path using the `cookies_file` parameter.
+
+**Response:**
+```json
+{
+  "success": true,
+  "posts": [
+    {
+      "text": "Post content here...",
+      "name": "John Doe",
+      "profile_link": "https://www.linkedin.com/in/johndoe",
+      "job_application_link": "https://www.linkedin.com/jobs/view/123456",
+      "image_links": ["https://media.licdn.com/dms/image/..."]
+    }
+  ],
+  "count": 1,
+  "message": "Successfully scraped 1 posts"
+}
+```
+
+#### GET `/health`
+
+Health check endpoint to verify the API is running.
+
+**Response:**
+```json
+{
+  "status": "healthy",
+  "service": "LinkedIn Scraper API",
+  "version": "1.0.0"
+}
+```
+
+### Example API Usage
+
+**Using curl:**
+```bash
+curl -X POST "http://localhost:8000/scrape" \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: your-secret-api-key-here" \
+  -d '{
+    "url": "https://www.linkedin.com/search/results/content/?keywords=python",
+    "max_scroll": 5,
+    "scroll_delay": 2,
+    "headless": false
+  }'
+```
+
+**Using Python requests:**
+```python
+import requests
+import os
+
+# Get API key from environment variable or use default
+api_key = os.getenv('LINKEDIN_SCRAPER_API_KEY', 'your-secret-api-key-here')
+
+# Make API request (cookies are loaded from server's linkedin_cookies.json file)
+response = requests.post(
+    'http://localhost:8000/scrape',
+    headers={
+        'X-API-Key': api_key,
+        'Content-Type': 'application/json'
+    },
+    json={
+        'url': 'https://www.linkedin.com/search/results/content/?keywords=python',
+        'max_scroll': 5,
+        'scroll_delay': 2,
+        'headless': False
+    }
+)
+
+if response.status_code == 200:
+    result = response.json()
+    print(f"Scraped {result['count']} posts")
+    for post in result['posts']:
+        print(f"- {post['name']}: {post['text'][:100]}...")
+else:
+    print(f"Error: {response.status_code} - {response.text}")
+```
+
+**Using JavaScript/Node.js:**
+```javascript
+const fetch = require('node-fetch');
+
+const apiKey = process.env.LINKEDIN_SCRAPER_API_KEY || 'your-secret-api-key-here';
+
+fetch('http://localhost:8000/scrape', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+    'X-API-Key': apiKey
+  },
+  body: JSON.stringify({
+    url: 'https://www.linkedin.com/search/results/content/?keywords=python',
+    max_scroll: 5,
+    scroll_delay: 2,
+    headless: false
+  })
+})
+.then(res => res.json())
+.then(data => {
+  console.log(`Scraped ${data.count} posts`);
+  data.posts.forEach(post => {
+    console.log(`- ${post.name}: ${post.text.substring(0, 100)}...`);
+  });
+})
+.catch(error => {
+  console.error('Error:', error);
+});
+```
+
+### API Error Handling
+
+The API returns appropriate HTTP status codes:
+- `200`: Success
+- `401`: Unauthorized (missing API key)
+- `403`: Forbidden (invalid API key)
+- `400`: Bad Request (invalid parameters, missing required fields)
+- `500`: Internal Server Error (scraping failed, unexpected errors)
+
+**Authentication Errors:**
+```json
+{
+  "detail": "API key is missing. Please provide X-API-Key header."
+}
+```
+
+```json
+{
+  "detail": "Invalid API key. Access denied."
+}
+```
+
+Error responses include detailed error messages:
+```json
+{
+  "detail": {
+    "error": "Scraping failed",
+    "message": "Error description here",
+    "details": "Full traceback (in development mode)"
+  }
+}
+```
+
+### Deploying the API
+
+For production deployment, consider using:
+- **Gunicorn with Uvicorn workers**: `gunicorn api:app -w 4 -k uvicorn.workers.UvicornWorker`
+- **Docker**: Create a Dockerfile and deploy to container platforms
+- **Cloud platforms**: Deploy to AWS, Google Cloud, Azure, or Heroku
+
+**Important Notes:**
+- **Cookies File**: The API uses a local `linkedin_cookies.json` file on the server for authentication. Make sure this file exists in the application directory before making requests.
+- **Cookies File Location**: 
+  - Default: `linkedin_cookies.json` in the application directory
+  - Docker: Mount the file as a volume (see `docker-compose.yml`)
+  - You can specify a custom path using the `cookies_file` parameter in the request
+- **Updating Cookies**: When cookies expire, update the `linkedin_cookies.json` file on the server and restart the container/service.
+
+**Note**: When deploying to a server, ensure:
+1. Playwright browsers are installed: `playwright install chromium`
+2. Required system dependencies are available
+3. Consider running in headless mode (`headless: true`) for server environments
+4. Set a strong API key via `LINKEDIN_SCRAPER_API_KEY` environment variable
+5. Set up HTTPS/SSL for production use
+6. Place `linkedin_cookies.json` file in the application directory or mount it as a volume
 
 ## Notes
 

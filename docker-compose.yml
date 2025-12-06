@@ -1,0 +1,33 @@
+version: '3.8'
+
+services:
+  linkedin-scraper-api:
+    build: .
+    container_name: linkedin-scraper-api
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - LINKEDIN_SCRAPER_API_KEY=${LINKEDIN_SCRAPER_API_KEY:-Playindark-andstayalive-22-bye}
+      - LINKEDIN_SCRAPER_AUTH_ENABLED=${LINKEDIN_SCRAPER_AUTH_ENABLED:-true}
+    volumes:
+      # Optional: Mount logs directory if you want persistent logs
+      - ./logs:/app/logs
+      # Mount cookies file (update path to your cookies file location)
+      - ./linkedin_cookies.json:/app/linkedin_cookies.json:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    # Resource limits (adjust based on your server)
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '1'
+          memory: 1G
+

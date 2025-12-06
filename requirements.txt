@@ -1,2 +1,4 @@
 playwright==1.40.0
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
 

@@ -13,6 +13,7 @@ import json
 import sys
 import time
 import platform
+import signal
 from typing import List, Dict, Optional
 from playwright.sync_api import sync_playwright, Browser, Page, Cookie
 
@@ -122,260 +123,304 @@ class LinkedInScraper:
         Returns:
             List of dictionaries containing post data
         """
-        with sync_playwright() as p:
-            # Try Firefox first for non-headless mode (more stable on macOS)
-            # Fallback to Chromium if Firefox fails
-            browser = None
-            browser_type = None
+        print("SCRAPER: Starting scrape_posts method", flush=True)
+        print(f"SCRAPER: Parameters - url={url[:50]}..., max_scroll={max_scroll}, scroll_delay={scroll_delay}, headless={headless}", flush=True)
+        
+        print("SCRAPER: About to start sync_playwright context...", flush=True)
+        import os
+        
+        # Ensure PLAYWRIGHT_BROWSERS_PATH is set correctly
+        browsers_path = os.path.expanduser('~/.cache/ms-playwright')
+        os.environ['PLAYWRIGHT_BROWSERS_PATH'] = browsers_path
+        print(f"SCRAPER: PLAYWRIGHT_BROWSERS_PATH={browsers_path}", flush=True)
+        print(f"SCRAPER: Checking if browsers exist at {browsers_path}...", flush=True)
+        
+        # Check if browser exists
+        chromium_path = os.path.join(browsers_path, 'chromium-1091', 'chrome-linux', 'chrome')
+        if os.path.exists(chromium_path):
+            print(f"SCRAPER: Chromium found at {chromium_path}", flush=True)
+        else:
+            print(f"SCRAPER: WARNING - Chromium not found at {chromium_path}", flush=True)
+            # Try to find any chromium installation
+            import glob
+            chromium_dirs = glob.glob(os.path.join(browsers_path, 'chromium-*'))
+            if chromium_dirs:
+                print(f"SCRAPER: Found chromium directories: {chromium_dirs}", flush=True)
+            else:
+                print(f"SCRAPER: ERROR - No chromium installation found!", flush=True)
+        
+        try:
+            print("SCRAPER: Calling sync_playwright()...", flush=True)
+            sys.stdout.flush()
+            sys.stderr.flush()
             
-            # Try Firefox first (better for non-headless on macOS)
-            firefox_launched = False
-            if not headless:
-                try:
-                    print(f"Attempting to launch Firefox browser (headless={headless})...")
-                    browser = p.firefox.launch(headless=headless)
-                    browser_type = 'firefox'
-                    firefox_launched = True
-                    print("Firefox browser launched successfully")
-                except Exception as firefox_error:
-                    print(f"Firefox launch failed: {str(firefox_error)}")
-                    print("Trying Chromium...")
+            # Import here to ensure it's fresh in this process
+            from playwright.sync_api import sync_playwright
             
-            # Try Chromium if Firefox failed or if headless mode
-            if not browser:
-                try:
-                    print(f"Attempting to launch Chromium browser (headless={headless})...")
-                    launch_args = {
-                        'headless': headless,
-                        'slow_mo': 100,  # Add small delay between operations for stability
-                        'args': [
-                            '--no-sandbox',
-                            '--disable-setuid-sandbox',
-                            '--disable-blink-features=AutomationControlled',
-                            '--disable-dev-shm-usage'
-                        ]
-                    }
-                    # In headless mode, we don't need some of these args
-                    if headless:
-                        launch_args['args'].extend(['--disable-gpu', '--disable-software-rasterizer'])
-                    
-                    browser = p.chromium.launch(**launch_args)
-                    browser_type = 'chromium'
-                    print("Chromium browser launched successfully")
-                except Exception as chromium_error:
-                    print(f"Chromium launch failed: {str(chromium_error)}")
-                    # If Firefox also failed and we're in non-headless, try Firefox again
-                    if not headless:
-                        print("Retrying Firefox...")
-                        try:
-                            browser = p.firefox.launch(headless=headless)
-                            browser_type = 'firefox'
-                            print("Firefox browser launched successfully on retry")
-                        except:
-                            pass
-                    
-                    # Last resort: WebKit
-                    if not browser:
-                        print("Trying WebKit as last resort...")
-                        try:
-                            browser = p.webkit.launch(headless=headless)
-                            browser_type = 'webkit'
-                            print("WebKit browser launched successfully")
-                        except Exception as webkit_error:
-                            print(f"All browsers failed to launch!")
-                            if 'chromium_error' in locals():
-                                print(f"Chromium error: {str(chromium_error)}")
-                            if 'firefox_error' in locals():
-                                print(f"Firefox error: {str(firefox_error)}")
-                            print(f"WebKit error: {str(webkit_error)}")
-                            raise Exception("Could not launch any browser. Please check Playwright installation.")
+            print("SCRAPER: About to enter sync_playwright context...", flush=True)
+            sys.stdout.flush()
+            sys.stderr.flush()
             
-            if not browser:
-                raise Exception("Browser launch failed")
-            
-            try:
-                # Create browser context
-                print("Creating browser context...")
-                # Set appropriate user agent based on browser type and OS
-                os_name = platform.system().lower()
-                if browser_type == 'firefox':
-                    if os_name == 'windows':
-                        user_agent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/119.0'
-                    elif os_name == 'linux':
-                        user_agent = 'Mozilla/5.0 (X11; Linux x86_64; rv:109.0) Gecko/20100101 Firefox/119.0'
-                    else:  # macOS
-                        user_agent = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:109.0) Gecko/20100101 Firefox/119.0'
-                else:  # Chromium
-                    if os_name == 'windows':
-                        user_agent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-                    elif os_name == 'linux':
-                        user_agent = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-                    else:  # macOS
-                        user_agent = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            with sync_playwright() as p:
+                print("SCRAPER: sync_playwright context started successfully", flush=True)
+                sys.stdout.flush()
+                # Try Firefox first for non-headless mode (more stable on macOS)
+                # Fallback to Chromium if Firefox fails
+                browser = None
+                browser_type = None
                 
-                context = browser.new_context(
-                    user_agent=user_agent,
-                    viewport={'width': 1920, 'height': 1080},
-                    ignore_https_errors=True
-                )
-                print("Browser context created")
-                
-                # Create page
-                print("Creating page...")
-                page = context.new_page()
-                print("Page created successfully")
-                
-                # Navigate to LinkedIn domain first before adding cookies
-                # This ensures the browser context is properly initialized
-                print("Initializing browser context by navigating to LinkedIn...")
-                try:
-                    page.goto('https://www.linkedin.com', wait_until='domcontentloaded', timeout=30000)
-                    print("Successfully navigated to LinkedIn")
-                    time.sleep(2)  # Wait for page to initialize
-                except Exception as nav_error:
-                    print(f"Warning during initial navigation: {str(nav_error)}")
-                    print("Continuing anyway...")
-                
-                # Add cookies if provided (after navigating to domain)
-                if self.cookies:
+                # Try Firefox first (better for non-headless on macOS)
+                firefox_launched = False
+                if not headless:
                     try:
-                        print(f"Adding {len(self.cookies)} cookies...")
-                        context.add_cookies(self.cookies)
-                        print(f"Successfully added {len(self.cookies)} cookies to browser context")
-                        # Reload page to apply cookies
-                        page.reload(wait_until='domcontentloaded', timeout=30000)
-                        time.sleep(2)
-                    except Exception as cookie_error:
-                        print(f"Warning: Error adding cookies: {str(cookie_error)}")
-                        print("Continuing without cookies...")
+                        print(f"SCRAPER: Attempting to launch Firefox browser (headless={headless})...", flush=True)
+                        browser = p.firefox.launch(headless=headless)
+                        browser_type = 'firefox'
+                        firefox_launched = True
+                        print("SCRAPER: Firefox browser launched successfully", flush=True)
+                    except Exception as firefox_error:
+                        print(f"SCRAPER: Firefox launch failed: {str(firefox_error)}", flush=True)
+                        print("SCRAPER: Trying Chromium...", flush=True)
                 
-                # Now navigate to the actual target URL
-                print(f"Navigating to target URL: {url}")
-                navigation_success = False
-                try:
-                    # Use 'domcontentloaded' instead of 'networkidle' - LinkedIn has continuous network activity
-                    page.goto(url, wait_until='domcontentloaded', timeout=60000)
-                    print("Successfully navigated to target URL")
-                    navigation_success = True
-                except Exception as nav_error:
-                    print(f"Navigation timeout or error: {str(nav_error)}")
-                    print("Page may still be loading. Checking current URL...")
+                # Try Chromium if Firefox failed or if headless mode
+                if not browser:
                     try:
-                        current_url = page.url
-                        print(f"Current URL: {current_url}")
-                        # If we're on LinkedIn domain, continue anyway
-                        if 'linkedin.com' in current_url:
-                            print("On LinkedIn domain. Continuing with scraping...")
-                            navigation_success = True
-                        else:
-                            print("Not on LinkedIn domain. Waiting 5 seconds and retrying...")
-                            time.sleep(5)
+                        print(f"SCRAPER: Attempting to launch Chromium browser (headless={headless})...", flush=True)
+                        launch_args = {
+                            'headless': headless,
+                            'slow_mo': 100,  # Add small delay between operations for stability
+                            'args': [
+                                '--no-sandbox',
+                                '--disable-setuid-sandbox',
+                                '--disable-blink-features=AutomationControlled',
+                                '--disable-dev-shm-usage'
+                            ]
+                        }
+                        # In headless mode, we don't need some of these args
+                        if headless:
+                            launch_args['args'].extend(['--disable-gpu', '--disable-software-rasterizer'])
+                        
+                        print(f"SCRAPER: Launch args: {launch_args}", flush=True)
+                        print("SCRAPER: Calling p.chromium.launch()...", flush=True)
+                        browser = p.chromium.launch(**launch_args)
+                        browser_type = 'chromium'
+                        print("SCRAPER: Chromium browser launched successfully", flush=True)
+                    except Exception as chromium_error:
+                        print(f"SCRAPER: Chromium launch failed: {str(chromium_error)}", flush=True)
+                        # If Firefox also failed and we're in non-headless, try Firefox again
+                        if not headless:
+                            print("SCRAPER: Retrying Firefox...", flush=True)
                             try:
-                                page.goto(url, wait_until='domcontentloaded', timeout=30000)
-                                navigation_success = True
+                                browser = p.firefox.launch(headless=headless)
+                                browser_type = 'firefox'
+                                print("SCRAPER: Firefox browser launched successfully on retry", flush=True)
                             except:
-                                print("Retry failed. Continuing anyway...")
-                                navigation_success = True  # Continue to try scrolling
-                    except:
-                        print("Could not check URL. Continuing anyway...")
-                        navigation_success = True  # Continue to try scrolling
+                                pass
+                        
+                        # Last resort: WebKit
+                        if not browser:
+                            print("SCRAPER: Trying WebKit as last resort...", flush=True)
+                            try:
+                                browser = p.webkit.launch(headless=headless)
+                                browser_type = 'webkit'
+                                print("SCRAPER: WebKit browser launched successfully", flush=True)
+                            except Exception as webkit_error:
+                                print(f"SCRAPER: All browsers failed to launch!", flush=True)
+                                print(f"SCRAPER: Chromium error: {str(chromium_error)}", flush=True)
+                                print(f"SCRAPER: WebKit error: {str(webkit_error)}", flush=True)
+                                raise Exception("Could not launch any browser. Please check Playwright installation.")
                 
-                # Check for account selection/login page and handle it
-                print("Checking for account selection/login page...")
-                self._handle_account_selection(page)
+                if not browser:
+                    raise Exception("Browser launch failed")
                 
-                # Wait for page to settle
-                print("Waiting for page content to load...")
-                time.sleep(5)
-                
-                # Check if page has content before scrolling
                 try:
-                    page_height = page.evaluate("document.body.scrollHeight || document.documentElement.scrollHeight")
-                    print(f"Initial page height: {page_height}px")
-                    if page_height < 500:
-                        print("Page height is very small. Waiting more for content to load...")
-                        time.sleep(5)
-                        page_height = page.evaluate("document.body.scrollHeight || document.documentElement.scrollHeight")
-                        print(f"Page height after wait: {page_height}px")
-                except Exception as e:
-                    print(f"Could not check page height: {str(e)}")
-                
-                # Scroll to load more posts
-                print(f"\nScrolling to load more posts (max {max_scroll} times)...")
-                last_height = 0
-                no_change_count = 0
-                
-                for i in range(max_scroll):
+                    # Create browser context
+                    print("Creating browser context...", flush=True)
+                    # Set appropriate user agent based on browser type and OS
+                    os_name = platform.system().lower()
+                    if browser_type == 'firefox':
+                        if os_name == 'windows':
+                            user_agent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/119.0'
+                        elif os_name == 'linux':
+                            user_agent = 'Mozilla/5.0 (X11; Linux x86_64; rv:109.0) Gecko/20100101 Firefox/119.0'
+                        else:  # macOS
+                            user_agent = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:109.0) Gecko/20100101 Firefox/119.0'
+                    else:  # Chromium
+                        if os_name == 'windows':
+                            user_agent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+                        elif os_name == 'linux':
+                            user_agent = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+                        else:  # macOS
+                            user_agent = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+                    
+                    context = browser.new_context(
+                        user_agent=user_agent,
+                        viewport={'width': 1920, 'height': 1080},
+                        ignore_https_errors=True
+                    )
+                    print("Browser context created", flush=True)
+                    
+                    # Create page
+                    print("Creating page...", flush=True)
+                    page = context.new_page()
+                    print("Page created successfully", flush=True)
+                    
+                    # Navigate to LinkedIn domain first before adding cookies
+                    # This ensures the browser context is properly initialized
+                    print("Initializing browser context by navigating to LinkedIn...", flush=True)
                     try:
-                        # Get current page height
-                        current_height = page.evaluate("""
-                            () => {
-                                return Math.max(
-                                    document.body.scrollHeight,
-                                    document.documentElement.scrollHeight,
-                                    document.body.offsetHeight,
-                                    document.documentElement.offsetHeight
-                                );
-                            }
-                        """)
-                        
-                        # Scroll down
-                        page.evaluate("window.scrollTo(0, document.body.scrollHeight || document.documentElement.scrollHeight)")
-                        time.sleep(scroll_delay)
-                        
-                        # Check if new content loaded
-                        new_height = page.evaluate("""
-                            () => {
-                                return Math.max(
-                                    document.body.scrollHeight,
-                                    document.documentElement.scrollHeight,
-                                    document.body.offsetHeight,
-                                    document.documentElement.offsetHeight
-                                );
-                            }
-                        """)
-                        
-                        if new_height == current_height:
-                            no_change_count += 1
-                            if no_change_count >= 3:
-                                print(f"No new content loaded after {no_change_count} scrolls. Stopping scroll.")
-                                break
-                        else:
-                            no_change_count = 0  # Reset if content loaded
-                        
-                        print(f"Scroll {i+1}/{max_scroll} completed (page height: {new_height}px)")
-                        last_height = new_height
-                        
-                    except Exception as scroll_error:
-                        print(f"Error during scroll {i+1}: {str(scroll_error)}")
-                        # Try to continue scrolling
+                        page.goto('https://www.linkedin.com', wait_until='domcontentloaded', timeout=30000)
+                        print("Successfully navigated to LinkedIn", flush=True)
+                        time.sleep(2)  # Wait for page to initialize
+                    except Exception as nav_error:
+                        print(f"Warning during initial navigation: {str(nav_error)}", flush=True)
+                        print("Continuing anyway...", flush=True)
+                    
+                    # Add cookies if provided (after navigating to domain)
+                    if self.cookies:
                         try:
+                            print(f"Adding {len(self.cookies)} cookies...", flush=True)
+                            context.add_cookies(self.cookies)
+                            print(f"Successfully added {len(self.cookies)} cookies to browser context", flush=True)
+                            # Reload page to apply cookies
+                            page.reload(wait_until='domcontentloaded', timeout=30000)
+                            time.sleep(2)
+                        except Exception as cookie_error:
+                            print(f"Warning: Error adding cookies: {str(cookie_error)}", flush=True)
+                            print("Continuing without cookies...", flush=True)
+                    
+                    # Now navigate to the actual target URL
+                    print(f"Navigating to target URL: {url}", flush=True)
+                    navigation_success = False
+                    try:
+                        # Use 'domcontentloaded' instead of 'networkidle' - LinkedIn has continuous network activity
+                        page.goto(url, wait_until='domcontentloaded', timeout=60000)
+                        print("Successfully navigated to target URL", flush=True)
+                        navigation_success = True
+                    except Exception as nav_error:
+                        print(f"Navigation timeout or error: {str(nav_error)}", flush=True)
+                        print("Page may still be loading. Checking current URL...", flush=True)
+                        try:
+                            current_url = page.url
+                            print(f"Current URL: {current_url}", flush=True)
+                            # If we're on LinkedIn domain, continue anyway
+                            if 'linkedin.com' in current_url:
+                                print("On LinkedIn domain. Continuing with scraping...", flush=True)
+                                navigation_success = True
+                            else:
+                                print("Not on LinkedIn domain. Waiting 5 seconds and retrying...", flush=True)
+                                time.sleep(5)
+                                try:
+                                    page.goto(url, wait_until='domcontentloaded', timeout=30000)
+                                    navigation_success = True
+                                except:
+                                    print("Retry failed. Continuing anyway...", flush=True)
+                                    navigation_success = True  # Continue to try scrolling
+                        except:
+                            print("Could not check URL. Continuing anyway...", flush=True)
+                            navigation_success = True  # Continue to try scrolling
+                    
+                    # Check for account selection/login page and handle it
+                    print("Checking for account selection/login page...", flush=True)
+                    self._handle_account_selection(page)
+                    
+                    # Wait for page to settle
+                    print("Waiting for page content to load...", flush=True)
+                    time.sleep(5)
+                    
+                    # Check if page has content before scrolling
+                    try:
+                        page_height = page.evaluate("document.body.scrollHeight || document.documentElement.scrollHeight")
+                        print(f"Initial page height: {page_height}px", flush=True)
+                        if page_height < 500:
+                            print("Page height is very small. Waiting more for content to load...", flush=True)
+                            time.sleep(5)
+                            page_height = page.evaluate("document.body.scrollHeight || document.documentElement.scrollHeight")
+                            print(f"Page height after wait: {page_height}px", flush=True)
+                    except Exception as e:
+                        print(f"Could not check page height: {str(e)}", flush=True)
+                    
+                    # Scroll to load more posts
+                    print(f"\nScrolling to load more posts (max {max_scroll} times)...", flush=True)
+                    last_height = 0
+                    no_change_count = 0
+                    
+                    for i in range(max_scroll):
+                        try:
+                            # Get current page height
+                            current_height = page.evaluate("""
+                                () => {
+                                    return Math.max(
+                                        document.body.scrollHeight,
+                                        document.documentElement.scrollHeight,
+                                        document.body.offsetHeight,
+                                        document.documentElement.offsetHeight
+                                    );
+                                }
+                            """)
+                            
+                            # Scroll down
                             page.evaluate("window.scrollTo(0, document.body.scrollHeight || document.documentElement.scrollHeight)")
                             time.sleep(scroll_delay)
-                        except:
-                            print("Could not continue scrolling. Stopping.")
-                            break
-                
-                # Extract posts
-                print("Extracting posts...")
-                posts = self._extract_posts(page)
-                print(f"Found {len(posts)} posts")
-                
-                return posts
-                
-            except Exception as e:
-                print(f"Error during scraping: {str(e)}")
-                import traceback
-                traceback.print_exc()
-                raise
-            finally:
-                try:
-                    if 'browser' in locals() and browser:
-                        browser.close()
-                        print("Browser closed")
-                except:
-                    pass
-    
+                            
+                            # Check if new content loaded
+                            new_height = page.evaluate("""
+                                () => {
+                                    return Math.max(
+                                        document.body.scrollHeight,
+                                        document.documentElement.scrollHeight,
+                                        document.body.offsetHeight,
+                                        document.documentElement.offsetHeight
+                                    );
+                                }
+                            """)
+                            
+                            if new_height == current_height:
+                                no_change_count += 1
+                                if no_change_count >= 3:
+                                    print(f"No new content loaded after {no_change_count} scrolls. Stopping scroll.", flush=True)
+                                    break
+                            else:
+                                no_change_count = 0  # Reset if content loaded
+                            
+                            print(f"Scroll {i+1}/{max_scroll} completed (page height: {new_height}px)", flush=True)
+                            last_height = new_height
+                            
+                        except Exception as scroll_error:
+                            print(f"Error during scroll {i+1}: {str(scroll_error)}", flush=True)
+                            # Try to continue scrolling
+                            try:
+                                page.evaluate("window.scrollTo(0, document.body.scrollHeight || document.documentElement.scrollHeight)")
+                                time.sleep(scroll_delay)
+                            except:
+                                print("Could not continue scrolling. Stopping.", flush=True)
+                                break
+                    
+                    # Extract posts
+                    print("Extracting posts...", flush=True)
+                    posts = self._extract_posts(page)
+                    print(f"Found {len(posts)} posts", flush=True)
+                    
+                    return posts
+                    
+                except Exception as e:
+                    print(f"Error during scraping: {str(e)}", flush=True)
+                    import traceback
+                    traceback.print_exc()
+                    raise
+                finally:
+                    try:
+                        if 'browser' in locals() and browser:
+                            browser.close()
+                            print("Browser closed", flush=True)
+                    except:
+                        pass
+        except Exception as e:
+            print(f"SCRAPER: Error starting sync_playwright context: {str(e)}", flush=True)
+            import traceback
+            traceback.print_exc()
+            raise
+
     def _handle_account_selection(self, page: Page) -> bool:
         """
         Handle LinkedIn account selection/login page if present.

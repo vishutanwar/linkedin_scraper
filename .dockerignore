@@ -1,0 +1,51 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg
+*.egg-info
+dist
+build
+venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+logs/
+
+# Environment
+.env
+.env.local
+
+# Documentation
+*.md
+!README.md
+
+# Test files
+test/
+tests/
+*_test.py
+
+# Data files (don't include cookies in image)
+*.json
+!requirements.txt
+
+# OS
+.DS_Store
+Thumbs.db
+

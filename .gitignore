@@ -23,9 +23,8 @@ wheels/
 .installed.cfg
 *.egg
 
-# Cookies (sensitive data)
-*.json
-!linkedin_cookies_template.json
+# Cookies (sensitive data - don't commit)
+linkedin_cookies.json
 
 # IDE
 .vscode/
@@ -41,6 +40,15 @@ Thumbs.db
 # Output files
 linkedin_posts.json
 output.json
-
-#debug pages
 debug_page.html
+
+# Logs
+logs/
+*.log
+
+# Environment files
+.env
+.env.local
+
+# Docker volumes
+data/
