@@ -46,6 +46,11 @@ debug_page.html
 logs/
 *.log
 
+# Test files
+test_*.py
+*_test.py
+*.sh
+
 # Environment files
 .env
 .env.local

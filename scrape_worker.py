@@ -41,6 +41,7 @@ def main():
         max_scroll = args.get('max_scroll', 5)
         scroll_delay = args.get('scroll_delay', 2)
         headless = args.get('headless', True)
+        proxy = args.get('proxy', None)
         
         # Load cookies
         with open(cookies_file, 'r') as f:
@@ -52,7 +53,8 @@ def main():
             url=url,
             max_scroll=max_scroll,
             scroll_delay=scroll_delay,
-            headless=headless
+            headless=headless,
+            proxy=proxy
         )
         
         # Restore stdout and output result as JSON

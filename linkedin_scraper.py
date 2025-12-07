@@ -110,7 +110,7 @@ class LinkedInScraper:
         
         return normalized
     
-    def scrape_posts(self, url: str, max_scroll: int = 5, scroll_delay: int = 2, headless: bool = False) -> List[Dict]:
+    def scrape_posts(self, url: str, max_scroll: int = 5, scroll_delay: int = 2, headless: bool = False, proxy: Optional[Dict] = None) -> List[Dict]:
         """
         Scrape LinkedIn posts from the given URL.
         
@@ -119,6 +119,7 @@ class LinkedInScraper:
             max_scroll: Maximum number of scrolls to load more posts
             scroll_delay: Delay between scrolls in seconds
             headless: Run browser in headless mode (default: False)
+            proxy: Optional proxy configuration dict with 'server' key (e.g., {'server': 'http://proxy:port'})
             
         Returns:
             List of dictionaries containing post data
@@ -201,6 +202,8 @@ class LinkedInScraper:
                             launch_args['args'].extend(['--disable-gpu', '--disable-software-rasterizer'])
                         
                         print(f"SCRAPER: Launch args: {launch_args}", flush=True)
+                        if proxy:
+                            print(f"SCRAPER: Using proxy: {proxy.get('server', 'N/A')}", flush=True)
                         print("SCRAPER: Calling p.chromium.launch()...", flush=True)
                         browser = p.chromium.launch(**launch_args)
                         browser_type = 'chromium'
@@ -253,11 +256,18 @@ class LinkedInScraper:
                         else:  # macOS
                             user_agent = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
                     
-                    context = browser.new_context(
-                        user_agent=user_agent,
-                        viewport={'width': 1920, 'height': 1080},
-                        ignore_https_errors=True
-                    )
+                    context_options = {
+                        'user_agent': user_agent,
+                        'viewport': {'width': 1920, 'height': 1080},
+                        'ignore_https_errors': True
+                    }
+                    
+                    # Add proxy if provided
+                    if proxy:
+                        context_options['proxy'] = proxy
+                        print(f"SCRAPER: Browser context will use proxy: {proxy.get('server', 'N/A')}", flush=True)
+                    
+                    context = browser.new_context(**context_options)
                     print("Browser context created", flush=True)
                     
                     # Create page
@@ -398,8 +408,47 @@ class LinkedInScraper:
                     
                     # Extract posts
                     print("Extracting posts...", flush=True)
+                    
+                    # Debug: Check page content before extraction
+                    try:
+                        page_title = page.title()
+                        current_url = page.url
+                        print(f"SCRAPER: Page title: {page_title}", flush=True)
+                        print(f"SCRAPER: Current URL: {current_url}", flush=True)
+                        
+                        # Check if we're on a login page or blocked
+                        if 'login' in current_url.lower() or 'challenge' in current_url.lower():
+                            print("SCRAPER: WARNING - Appears to be on login/challenge page!", flush=True)
+                        
+                        # Check page content
+                        body_text = page.evaluate("document.body.innerText || ''")
+                        print(f"SCRAPER: Page body text length: {len(body_text)} characters", flush=True)
+                        if len(body_text) < 100:
+                            print("SCRAPER: WARNING - Page content is very short, may indicate blocking or empty page", flush=True)
+                            print(f"SCRAPER: First 200 chars of body: {body_text[:200]}", flush=True)
+                    except Exception as debug_error:
+                        print(f"SCRAPER: Error during debug check: {str(debug_error)}", flush=True)
+                    
                     posts = self._extract_posts(page)
-                    print(f"Found {len(posts)} posts", flush=True)
+                    print(f"SCRAPER: Found {len(posts)} posts", flush=True)
+                    
+                    # If no posts found, provide more debugging info
+                    if len(posts) == 0:
+                        print("SCRAPER: No posts found. Checking page structure...", flush=True)
+                        try:
+                            # Check for common LinkedIn selectors
+                            selectors_to_check = [
+                                'div.feed-shared-update-v2',
+                                'div[data-id*="urn:li:activity"]',
+                                'article',
+                                '.feed-shared-update-v2',
+                                '[data-id^="urn:li:activity"]'
+                            ]
+                            for selector in selectors_to_check:
+                                count = page.evaluate(f"document.querySelectorAll('{selector}').length")
+                                print(f"SCRAPER: Found {count} elements matching '{selector}'", flush=True)
+                        except Exception as selector_error:
+                            print(f"SCRAPER: Error checking selectors: {str(selector_error)}", flush=True)
                     
                     return posts
                     

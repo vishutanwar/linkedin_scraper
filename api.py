@@ -88,6 +88,13 @@ class CookieModel(BaseModel):
     sameSite: Optional[str] = None
 
 
+class ProxyConfig(BaseModel):
+    """Proxy configuration model."""
+    server: str = Field(..., description="Proxy server URL (e.g., 'http://proxy.example.com:8080')")
+    username: Optional[str] = Field(None, description="Proxy username (optional)")
+    password: Optional[str] = Field(None, description="Proxy password (optional)")
+
+
 class ScrapeRequest(BaseModel):
     """Request model for scraping LinkedIn posts."""
     url: HttpUrl = Field(..., description="LinkedIn search results URL to scrape")
@@ -95,6 +102,10 @@ class ScrapeRequest(BaseModel):
     scroll_delay: int = Field(default=2, ge=1, le=10, description="Delay between scrolls in seconds")
     headless: bool = Field(default=False, description="Run browser in headless mode")
     cookies_file: str = Field(default="linkedin_cookies.json", description="Path to cookies JSON file (relative to app directory)")
+    proxy: Optional[ProxyConfig] = Field(
+        None,
+        description="Optional proxy configuration for the browser"
+    )
 
     @field_validator('url')
     @classmethod
@@ -136,7 +147,12 @@ async def run_scraping_in_subprocess(scrape_args, timeout_seconds):
     Run scraping using subprocess.Popen instead of ProcessPoolExecutor.
     This avoids Playwright's issues with ProcessPoolExecutor.
     """
-    cookies_file, url, max_scroll, scroll_delay, headless = scrape_args
+    # Unpack all arguments including proxy
+    if len(scrape_args) > 5:
+        cookies_file, url, max_scroll, scroll_delay, headless, proxy = scrape_args
+    else:
+        cookies_file, url, max_scroll, scroll_delay, headless = scrape_args
+        proxy = None
     
     # Prepare arguments as JSON
     args_json = json.dumps({
@@ -144,7 +160,8 @@ async def run_scraping_in_subprocess(scrape_args, timeout_seconds):
         'url': url,
         'max_scroll': max_scroll,
         'scroll_delay': scroll_delay,
-        'headless': headless
+        'headless': headless,
+        'proxy': proxy
     })
     
     # Get path to worker script
@@ -179,6 +196,10 @@ async def run_scraping_in_subprocess(scrape_args, timeout_seconds):
         # Decode output
         stdout_text = stdout.decode('utf-8') if stdout else ""
         stderr_text = stderr.decode('utf-8') if stderr else ""
+        
+        # Log stderr output for debugging (contains all scraper debug messages)
+        if stderr_text:
+            logger.info(f"Worker process output (stderr):\n{stderr_text[-2000:]}")  # Last 2000 chars to avoid too much logging
         
         if process.returncode != 0:
             error_output = stderr_text or stdout_text or "Unknown error"
@@ -284,12 +305,23 @@ async def scrape_linkedin_posts(
         # We use subprocess.Popen instead of ProcessPoolExecutor to avoid Playwright driver issues
         try:
             logger.info("Starting scraping process...")
+            # Prepare proxy config if provided
+            proxy_config = None
+            if request.proxy:
+                proxy_config = {
+                    'server': request.proxy.server
+                }
+                if request.proxy.username and request.proxy.password:
+                    proxy_config['username'] = request.proxy.username
+                    proxy_config['password'] = request.proxy.password
+            
             scrape_args = (
                 cookies_file_path,  # Pass file path instead of cookies
                 str(request.url),
                 request.max_scroll,
                 request.scroll_delay,
-                effective_headless  # Use effective headless mode
+                effective_headless,  # Use effective headless mode
+                proxy_config  # Proxy configuration
             )
             
             # Calculate timeout: (max_scroll * scroll_delay) + 120 seconds buffer
