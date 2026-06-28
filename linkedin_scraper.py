@@ -1496,7 +1496,7 @@ class LinkedInScraper:
                 # Use JavaScript to find posts and extract data directly
                 # Use a simpler JavaScript approach to avoid quote escaping issues
                 js_posts = page.evaluate("""
-                    (function() {
+                    (async function() {
                         var posts = [];
                         var seenPosts = new Set(); // Track unique posts by content hash
                         
@@ -1823,6 +1823,99 @@ class LinkedInScraper:
                                     }
                                 }
                                 
+                                // Extract comments
+                                var comments = [];
+                                try {
+                                    var commentBtn = elem.querySelector('button[aria-label*="Comment"]');
+                                    if (commentBtn) {
+                                        var btnText = (commentBtn.innerText || '').trim();
+                                        if (btnText && /^\d+$/.test(btnText) && parseInt(btnText) > 0) {
+                                            commentBtn.click();
+                                            await new Promise(function(resolve) { setTimeout(resolve, 1500); });
+                                            
+                                            // Find all containers and filter out nested ones
+                                            var allContainers = elem.querySelectorAll('[componentkey*="urn:li:comment:"]');
+                                            var commentContainers = [];
+                                            for (var cIdx = 0; cIdx < allContainers.length; cIdx++) {
+                                                var c = allContainers[cIdx];
+                                                var parent = c.parentElement;
+                                                var isNested = false;
+                                                while (parent && parent !== elem) {
+                                                    var pKey = parent.getAttribute('componentkey') || '';
+                                                    if (pKey && pKey.indexOf('urn:li:comment:') >= 0) {
+                                                        isNested = true;
+                                                        break;
+                                                    }
+                                                    parent = parent.parentElement;
+                                                }
+                                                if (!isNested) {
+                                                    commentContainers.push(c);
+                                                }
+                                            }
+                                            
+                                            for (var cIdx = 0; cIdx < commentContainers.length; cIdx++) {
+                                                var cContainer = commentContainers[cIdx];
+                                                var commenterName = '';
+                                                var commenterProfile = '';
+                                                
+                                                var allLinks = cContainer.querySelectorAll('a[href*="/in/"], a[href*="/company/"]');
+                                                for (var lIdx = 0; lIdx < allLinks.length; lIdx++) {
+                                                    var link = allLinks[lIdx];
+                                                    var nameElem = link.querySelector('[aria-hidden="true"]');
+                                                    var rawName = '';
+                                                    if (nameElem) {
+                                                        rawName = (nameElem.innerText || '').trim();
+                                                    } else {
+                                                        rawName = (link.innerText || '').trim();
+                                                    }
+                                                    if (rawName) {
+                                                        // Clean the name using our robust split chain
+                                                        commenterName = rawName.split('\\n')[0].split('•')[0].split('·')[0].split('Author')[0].split(',')[0].trim();
+                                                        commenterProfile = link.href || link.getAttribute('href') || '';
+                                                        if (commenterProfile) {
+                                                            if (commenterProfile.indexOf('?') > 0) {
+                                                                commenterProfile = commenterProfile.substring(0, commenterProfile.indexOf('?'));
+                                                            }
+                                                            if (commenterProfile.indexOf('http') < 0 && commenterProfile.indexOf('/') === 0) {
+                                                                commenterProfile = 'https://www.linkedin.com' + commenterProfile;
+                                                            }
+                                                        }
+                                                        break;
+                                                    }
+                                                }
+                                                
+                                                var commentText = '';
+                                                var textBoxes = cContainer.querySelectorAll('[data-testid="expandable-text-box"]');
+                                                if (textBoxes && textBoxes.length > 0) {
+                                                    var lastBox = textBoxes[textBoxes.length - 1];
+                                                    var moreBtn = lastBox.querySelector('button');
+                                                    var cleanText = (lastBox.innerText || '').trim();
+                                                    if (moreBtn) {
+                                                        var moreText = (moreBtn.innerText || '').trim();
+                                                        if (cleanText.endsWith(moreText)) {
+                                                            cleanText = cleanText.substring(0, cleanText.length - moreText.length).trim();
+                                                        }
+                                                        if (cleanText.endsWith('…')) {
+                                                            cleanText = cleanText.substring(0, cleanText.length - 1).trim();
+                                                        }
+                                                    }
+                                                    commentText = cleanText.replace(/\\s+/g, ' ').trim();
+                                                }
+                                                
+                                                if (commenterName && commentText) {
+                                                    comments.push({
+                                                        commenter_name: commenterName,
+                                                        commenter_profile_link: commenterProfile,
+                                                        comment_text: commentText
+                                                    });
+                                                }
+                                            }
+                                        }
+                                    }
+                                } catch (commentErr) {
+                                    // Ignore
+                                }
+                                
                                 // Only add if we have valid data
                                 if (cleanText.length >= 50 && profileLink && profileLink.indexOf('/in/') >= 0) {
                                     posts.push({
@@ -1831,7 +1924,8 @@ class LinkedInScraper:
                                         profile_link: profileLink,
                                         job_application_link: jobLink,
                                         post_link: postLink,
-                                        image_links: images
+                                        image_links: images,
+                                        comments: comments
                                     });
                                 }
                             } catch (e) {
@@ -1883,7 +1977,8 @@ class LinkedInScraper:
                                 'profile_link': js_post.get('profile_link', ''),
                                 'job_application_link': js_post.get('job_application_link', ''),
                                 'post_link': js_post.get('post_link', ''),
-                                'image_links': js_post.get('image_links', [])
+                                'image_links': js_post.get('image_links', []),
+                                'comments': js_post.get('comments', [])
                             })
                     
                     if extracted_posts:
@@ -2199,6 +2294,84 @@ class LinkedInScraper:
                     pass
                     
             post_data['post_link'] = post_link
+            
+            # Extract comments
+            comments = []
+            try:
+                comment_btn = post_element.query_selector('button[aria-label*="Comment"]')
+                if comment_btn:
+                    btn_text = comment_btn.inner_text().strip()
+                    if btn_text and btn_text.isdigit() and int(btn_text) > 0:
+                        comment_btn.click()
+                        page.wait_for_timeout(1500)
+                        
+                        # Find all containers and filter out nested ones
+                        all_containers = post_element.query_selector_all('[componentkey*="urn:li:comment:"]')
+                        comment_containers = []
+                        for c in all_containers:
+                            parent = c.query_selector('xpath=..')
+                            is_nested = False
+                            while parent and parent != post_element:
+                                try:
+                                    p_key = parent.get_attribute('componentkey') or ''
+                                    if p_key and 'urn:li:comment:' in p_key:
+                                        is_nested = True
+                                        break
+                                except:
+                                    pass
+                                parent = parent.query_selector('xpath=..')
+                            if not is_nested:
+                                comment_containers.append(c)
+                        
+                        for c_container in comment_containers:
+                            commenter_name = ''
+                            commenter_profile = ''
+                            
+                            all_links = c_container.query_selector_all('a[href*="/in/"], a[href*="/company/"]')
+                            for link in all_links:
+                                name_elem = link.query_selector('[aria-hidden="true"]')
+                                if name_elem:
+                                    raw_name = name_elem.inner_text().strip()
+                                else:
+                                    raw_name = link.inner_text().strip()
+                                    
+                                if raw_name:
+                                    import re
+                                    commenter_name = re.split(r'\n|•|·|Author|,', raw_name)[0].strip()
+                                    commenter_profile = link.get_attribute('href') or ''
+                                    if commenter_profile:
+                                        if '?' in commenter_profile:
+                                            commenter_profile = commenter_profile.split('?')[0]
+                                        if not commenter_profile.startswith('http') and commenter_profile.startswith('/'):
+                                            commenter_profile = f"https://www.linkedin.com{commenter_profile}"
+                                    break
+                                    
+                            comment_text = ''
+                            text_boxes = c_container.query_selector_all('[data-testid="expandable-text-box"]')
+                            if text_boxes:
+                                last_box = text_boxes[-1]
+                                more_btn = last_box.query_selector('button')
+                                clean_text = last_box.inner_text().strip()
+                                if more_btn:
+                                    more_text = more_btn.inner_text().strip()
+                                    if clean_text.endswith(more_text):
+                                        clean_text = clean_text[:-len(more_text)].strip()
+                                    if clean_text.endswith('…'):
+                                        clean_text = clean_text[:-1].strip()
+                                import re
+                                comment_text = re.sub(r'\s+', ' ', clean_text).strip()
+                                
+                            if commenter_name and comment_text:
+                                comments.append({
+                                    'commenter_name': commenter_name,
+                                    'commenter_profile_link': commenter_profile,
+                                    'comment_text': comment_text
+                                })
+            except Exception as e:
+                # Ignore comment errors
+                pass
+                
+            post_data['comments'] = comments
             
             # Only return if we have at least text or name
             if post_data['text'] or post_data['name']:
