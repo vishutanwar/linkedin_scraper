@@ -1413,6 +1413,9 @@ class LinkedInScraper:
                             filtered_elements = []
                             for elem in elements:
                                 try:
+                                    # Skip if it is a comment
+                                    if elem.evaluate('el => el.closest(".comments-comment-item, [componentkey*=\\"urn:li:comment:\\"], .comments-comments-list, [class*=\\"comment-item\\"], [class*=\\"comments-list\\"]")'):
+                                        continue
                                     text = elem.inner_text() if hasattr(elem, 'inner_text') else ''
                                     # Only include if it has substantial text (likely a post)
                                     if text and len(text.strip()) > 50:
@@ -1516,8 +1519,8 @@ class LinkedInScraper:
                             var containers = document.querySelectorAll(postContainerSelectors[s]);
                             for (var c = 0; c < containers.length; c++) {
                                 var container = containers[c];
-                                // Exclude navigation/header/footer
-                                if (!container.closest('nav, header, footer, [role="navigation"], [role="banner"]')) {
+                                // Exclude navigation/header/footer and comments
+                                if (!container.closest('nav, header, footer, [role="navigation"], [role="banner"], .comments-comment-item, [componentkey*="urn:li:comment:"], .comments-comments-list, [class*="comment-item"], [class*="comments-list"]')) {
                                     postContainers.push(container);
                                 }
                             }
@@ -1540,7 +1543,7 @@ class LinkedInScraper:
                                 var hasSubstantialText = (div.innerText || div.textContent || '').trim().length > 100;
                                 
                                 if ((hasActivityUrn || hasFeedClasses) && hasProfileLink && hasSubstantialText) {
-                                    if (!div.closest('nav, header, footer')) {
+                                    if (!div.closest('nav, header, footer, .comments-comment-item, [componentkey*="urn:li:comment:"], .comments-comments-list, [class*="comment-item"], [class*="comments-list"]')) {
                                         postContainers.push(div);
                                     }
                                 }
@@ -1565,7 +1568,24 @@ class LinkedInScraper:
                             var elem = postContainers[i];
                             try {
                                 // Get all text from this container
-                                var allText = (elem.innerText || elem.textContent || '').trim();
+                                // Clone the element and remove comments/social action bars before extracting text
+                                var cleanElem = elem.cloneNode(true);
+                                var toRemove = cleanElem.querySelectorAll([
+                                    '.comments-comment-item',
+                                    '.comments-comments-list',
+                                    '[class*="comments-list"]',
+                                    '.feed-shared-social-action-bar',
+                                    '[class*="social-action-bar"]',
+                                    '.comments-comment-box',
+                                    '[class*="comment-box"]',
+                                    '.feed-shared-update-v2__comments-container',
+                                    '[class*="comments-container"]'
+                                ].join(','));
+                                for (var tr = 0; tr < toRemove.length; tr++) {
+                                    toRemove[tr].remove();
+                                }
+                                
+                                var allText = (cleanElem.innerText || cleanElem.textContent || '').trim();
                                 
                                 // Skip if too short or too long (likely not a post)
                                 if (allText.length < 50 || allText.length > 50000) continue;
@@ -1799,6 +1819,12 @@ class LinkedInScraper:
                                                 var allLinks = cContainer.querySelectorAll('a[href*="/in/"], a[href*="/company/"]');
                                                 for (var lIdx = 0; lIdx < allLinks.length; lIdx++) {
                                                     var link = allLinks[lIdx];
+                                                    
+                                                    // Skip mentions inside comment text
+                                                    if (link.closest('[data-testid="expandable-text-box"]')) {
+                                                        continue;
+                                                    }
+                                                    
                                                     var nameElem = link.querySelector('[aria-hidden="true"]');
                                                     var rawName = '';
                                                     if (nameElem) {
@@ -2267,6 +2293,10 @@ class LinkedInScraper:
                             
                             all_links = c_container.query_selector_all('a[href*="/in/"], a[href*="/company/"]')
                             for link in all_links:
+                                # Skip mentions inside comment text
+                                if link.evaluate('el => el.closest("[data-testid=\'expandable-text-box\']")'):
+                                    continue
+                                    
                                 name_elem = link.query_selector('[aria-hidden="true"]')
                                 if name_elem:
                                     raw_name = name_elem.inner_text().strip()
