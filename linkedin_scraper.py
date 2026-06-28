@@ -1764,6 +1764,40 @@ class LinkedInScraper:
                                         postLink = postsLink.href || postsLink.getAttribute('href') || '';
                                     }
                                 }
+                                // Try 4: Extract from replaceableCommentTools componentkey
+                                if (!postLink) {
+                                    var commentTools = elem.querySelector('[componentkey*="replaceableCommentTools"]');
+                                    if (commentTools) {
+                                        var compKey = commentTools.getAttribute('componentkey') || '';
+                                        if (compKey) {
+                                            try {
+                                                var prefix = compKey.split('-')[0];
+                                                while (prefix.length % 4 !== 0) {
+                                                    prefix += '=';
+                                                }
+                                                var binary = atob(prefix.replace(/-/g, '+').replace(/_/g, '/'));
+                                                var bytes = new Uint8Array(binary.length);
+                                                for (var bIdx = 0; bIdx < binary.length; bIdx++) {
+                                                    bytes[bIdx] = binary.charCodeAt(bIdx);
+                                                }
+                                                var val = 0n;
+                                                var shift = 0n;
+                                                for (var vIdx = 3; vIdx < bytes.length; vIdx++) {
+                                                    var b = bytes[vIdx];
+                                                    val |= BigInt(b & 0x7f) << shift;
+                                                    if (!(b & 0x80)) break;
+                                                    shift += 7n;
+                                                }
+                                                var activityId = val >> 1n;
+                                                if (activityId > 0n) {
+                                                    postLink = 'https://www.linkedin.com/feed/update/urn:li:activity:' + activityId.toString();
+                                                }
+                                            } catch (e) {
+                                                // Ignore
+                                            }
+                                        }
+                                    }
+                                }
                                 // Clean post link
                                 if (postLink) {
                                     if (postLink.indexOf('?') > 0) {
@@ -2136,6 +2170,31 @@ class LinkedInScraper:
                                 post_link = f"https://www.linkedin.com{href.split('?')[0].split('#')[0]}"
                             else:
                                 post_link = href.split('?')[0].split('#')[0]
+                except:
+                    pass
+                    
+            # Try 4: Extract from replaceableCommentTools componentkey
+            if not post_link:
+                try:
+                    comment_tools = post_element.query_selector('[componentkey*="replaceableCommentTools"]')
+                    if comment_tools:
+                        comp_key = comment_tools.get_attribute('componentkey')
+                        if comp_key:
+                            prefix = comp_key.split('-')[0]
+                            import base64
+                            padded = prefix + "=" * ((4 - len(prefix) % 4) % 4)
+                            decoded_bytes = base64.b64decode(padded)
+                            varint_bytes = decoded_bytes[3:]
+                            val = 0
+                            shift = 0
+                            for b in varint_bytes:
+                                val |= (b & 0x7f) << shift
+                                if not (b & 0x80):
+                                    break
+                                shift += 7
+                            activity_id = val >> 1
+                            if activity_id > 0:
+                                post_link = f"https://www.linkedin.com/feed/update/urn:li:activity:{activity_id}"
                 except:
                     pass
                     
