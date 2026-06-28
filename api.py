@@ -380,6 +380,16 @@ async def scrape_linkedin_posts(
                 detail=f"Cookies file not found: {cookies_file_path}. Please ensure the cookies file exists on the server."
             )
         
+        # Calculate timeout based on max_scroll and scroll_delay
+        if request.max_scroll >= 25:
+            estimated_time_per_scroll = 50  # Very generous: 50 seconds per scroll for high counts
+        elif request.max_scroll >= 20:
+            estimated_time_per_scroll = request.scroll_delay + 12
+        else:
+            estimated_time_per_scroll = request.scroll_delay + 8
+        calculated_timeout = (request.max_scroll * estimated_time_per_scroll) + 300
+        timeout_seconds = max(300, min(calculated_timeout, 1800))
+        
         # Perform scraping in a subprocess to completely isolate from asyncio event loop
         # This is necessary because Playwright sync API cannot run inside an asyncio loop
         # We use subprocess.Popen instead of ProcessPoolExecutor to avoid Playwright driver issues
@@ -412,14 +422,6 @@ async def scrape_linkedin_posts(
             posts = result.get('posts', [])
             logger.info(f"Scraping completed. Found {len(posts) if posts else 0} posts.")
         except asyncio.TimeoutError as te:
-            if request.max_scroll >= 25:
-                estimated_time_per_scroll = 50  # Very generous: 50 seconds per scroll for high counts
-            elif request.max_scroll >= 20:
-                estimated_time_per_scroll = request.scroll_delay + 12
-            else:
-                estimated_time_per_scroll = request.scroll_delay + 8
-            calculated_timeout = (request.max_scroll * estimated_time_per_scroll) + 300
-            timeout_seconds = max(300, min(calculated_timeout, 1800))
             timeout_minutes = timeout_seconds / 60
             logger.error(f"Scraping timed out after {timeout_minutes:.1f} minutes")
             raise HTTPException(
