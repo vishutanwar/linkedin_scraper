@@ -147,6 +147,31 @@ class ScrapeResponse(BaseModel):
     message: str
 
 
+class ScrapeCommentsRequest(BaseModel):
+    """Request model for scraping comments from a specific post URL."""
+    post_url: HttpUrl = Field(..., description="LinkedIn post URL to scrape comments from")
+    max_comments: int = Field(default=50, ge=1, le=500, description="Maximum number of comments to extract")
+    headless: bool = Field(default=False, description="Run browser in headless mode")
+    cookies_file: str = Field(default="linkedin_cookies.json", description="Path to cookies JSON file (relative to app directory)")
+
+    @field_validator('post_url')
+    @classmethod
+    def validate_post_url(cls, v):
+        """Ensure URL is a LinkedIn URL."""
+        url_str = str(v)
+        if 'linkedin.com' not in url_str.lower():
+            raise ValueError("URL must be a LinkedIn URL")
+        return v
+
+
+class ScrapeCommentsResponse(BaseModel):
+    """Response model for scraping comments."""
+    success: bool
+    comments: List[CommentData]
+    count: int
+    message: str
+
+
 class ErrorResponse(BaseModel):
     """Error response model."""
     success: bool = False
@@ -155,27 +180,17 @@ class ErrorResponse(BaseModel):
     details: Optional[str] = None
 
 
-async def run_scraping_in_subprocess(scrape_args, timeout_seconds):
+async def run_scraping_in_subprocess(action: str, args_dict: dict, timeout_seconds: float):
     """
     Run scraping using subprocess.Popen instead of ProcessPoolExecutor.
     This avoids Playwright's issues with ProcessPoolExecutor.
     """
-    # Unpack all arguments including proxy
-    if len(scrape_args) > 5:
-        cookies_file, url, max_scroll, scroll_delay, headless, proxy = scrape_args
-    else:
-        cookies_file, url, max_scroll, scroll_delay, headless = scrape_args
-        proxy = None
-    
     # Prepare arguments as JSON
-    args_json = json.dumps({
-        'cookies_file': cookies_file,
-        'url': url,
-        'max_scroll': max_scroll,
-        'scroll_delay': scroll_delay,
-        'headless': headless,
-        'proxy': proxy
-    })
+    payload = {
+        'action': action,
+        **args_dict
+    }
+    args_json = json.dumps(payload)
     
     # Get path to worker script
     script_dir = os.path.dirname(__file__)
@@ -188,7 +203,7 @@ async def run_scraping_in_subprocess(scrape_args, timeout_seconds):
     env['PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS'] = '1'
     
     # Run the worker script as a subprocess
-    logger.info(f"Starting subprocess worker: {worker_script}")
+    logger.info(f"Starting subprocess worker: {worker_script} for action: {action}")
     process = await asyncio.create_subprocess_exec(
         sys.executable,
         worker_script,
@@ -228,11 +243,8 @@ async def run_scraping_in_subprocess(scrape_args, timeout_seconds):
             raise Exception(f"Scraping failed: {error_msg}")
         
         # Parse JSON result
-        # The worker script outputs only JSON to stdout (debug output goes to stderr)
         try:
-            # Try to find JSON in stdout (in case there's any extra output)
             stdout_text = stdout_text.strip()
-            # Look for JSON object (starts with {)
             json_start = stdout_text.find('{')
             if json_start >= 0:
                 stdout_text = stdout_text[json_start:]
@@ -246,7 +258,12 @@ async def run_scraping_in_subprocess(scrape_args, timeout_seconds):
         if not result.get('success', False):
             raise Exception(result.get('error', 'Unknown error'))
         
-        return result.get('posts', [])
+        return result
+        
+    except asyncio.TimeoutError:
+        process.kill()
+        await process.wait()
+        raise asyncio.TimeoutError("Scraping subprocess timed out")
         
     except asyncio.TimeoutError:
         process.kill()
@@ -328,37 +345,21 @@ async def scrape_linkedin_posts(
                     proxy_config['username'] = request.proxy.username
                     proxy_config['password'] = request.proxy.password
             
-            scrape_args = (
-                cookies_file_path,  # Pass file path instead of cookies
-                str(request.url),
-                request.max_scroll,
-                request.scroll_delay,
-                effective_headless,  # Use effective headless mode
-                proxy_config  # Proxy configuration
-            )
-            
-            # Calculate timeout: Account for actual wait times per scroll
-            # Each scroll takes: scroll_delay + random(0-3) + 2s wait + additional scroll wait + overhead
-            # For high scroll counts (>=25), use very generous calculation to allow up to 30 minutes
-            # Formula varies by scroll count to ensure high scroll counts can use full 30 minutes
-            # Minimum 5 minutes, maximum 30 minutes
-            if request.max_scroll >= 25:
-                # For very high scroll counts (25+), use very generous estimate to allow up to 30 minutes
-                # Use: (max_scroll * 50) + 300, which for 30 scrolls = 1800s = 30 min (capped at 30 min)
-                estimated_time_per_scroll = 50  # Very generous: 50 seconds per scroll for high counts
-            elif request.max_scroll >= 20:
-                # For high scroll counts, be generous
-                estimated_time_per_scroll = request.scroll_delay + 12
-            else:
-                estimated_time_per_scroll = request.scroll_delay + 8
-            calculated_timeout = (request.max_scroll * estimated_time_per_scroll) + 300
-            timeout_seconds = max(300, min(calculated_timeout, 1800))  # 5-30 minutes
+            args_dict = {
+                'cookies_file': cookies_file_path,
+                'url': str(request.url),
+                'max_scroll': request.max_scroll,
+                'scroll_delay': request.scroll_delay,
+                'headless': effective_headless,
+                'proxy': proxy_config
+            }
             
             # Use subprocess instead of ProcessPoolExecutor to avoid Playwright issues
             # ProcessPoolExecutor can cause Playwright's driver process to hang
             logger.info("Starting scraping subprocess...")
             logger.info(f"Waiting for scraping to complete (timeout: {timeout_seconds}s = {timeout_seconds/60:.1f} minutes)...")
-            posts = await run_scraping_in_subprocess(scrape_args, timeout_seconds)
+            result = await run_scraping_in_subprocess('scrape_posts', args_dict, timeout_seconds)
+            posts = result.get('posts', [])
             logger.info(f"Scraping completed. Found {len(posts) if posts else 0} posts.")
         except asyncio.TimeoutError as te:
             if request.max_scroll >= 25:
@@ -419,6 +420,119 @@ async def scrape_linkedin_posts(
             posts=formatted_posts,
             count=len(formatted_posts),
             message=f"Successfully scraped {len(formatted_posts)} posts"
+        )
+        
+    except HTTPException:
+        # Re-raise HTTP exceptions
+        raise
+    except Exception as e:
+        # Catch any unexpected errors
+        error_details = traceback.format_exc()
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": "Unexpected error occurred",
+                "message": str(e),
+                "details": error_details
+            }
+        )
+
+
+@app.post("/scrape-comments", response_model=ScrapeCommentsResponse)
+async def scrape_post_comments(
+    request: ScrapeCommentsRequest,
+    api_key_verified: bool = Depends(verify_api_key)
+):
+    """
+    Scrape comments from a specific LinkedIn post URL.
+    
+    Note: Cookies are loaded from a local JSON file on the server (default: linkedin_cookies.json).
+    The cookies file must be present on the server.
+    
+    Args:
+        request: ScrapeCommentsRequest containing post URL and parameters
+        
+    Returns:
+        ScrapeCommentsResponse with comments data
+        
+    Raises:
+        HTTPException: If scraping fails or request is invalid
+    """
+    try:
+        # Force headless mode in Docker/containerized environments (no display available)
+        is_container = os.path.exists('/.dockerenv') or os.environ.get('DOCKER_CONTAINER') == 'true'
+        effective_headless = request.headless if not is_container else True
+        
+        if is_container and not request.headless:
+            logger.warning("headless=False requested but running in container. Forcing headless=True")
+            
+        logger.info(f"Received scrape-comments request for URL: {request.post_url}")
+        logger.info(f"Parameters: max_comments={request.max_comments}, headless={effective_headless} (requested: {request.headless}, container: {is_container})")
+        logger.info(f"Using cookies file: {request.cookies_file}")
+        
+        # Check if cookies file exists
+        cookies_file_path = request.cookies_file
+        if not os.path.isabs(cookies_file_path):
+            cookies_file_path = os.path.join(os.path.dirname(__file__), cookies_file_path)
+            
+        if not os.path.exists(cookies_file_path):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Cookies file not found: {cookies_file_path}. Please ensure the cookies file exists on the server."
+            )
+            
+        try:
+            logger.info("Starting scraping process for comments...")
+            args_dict = {
+                'cookies_file': cookies_file_path,
+                'url': str(request.post_url),
+                'max_comments': request.max_comments,
+                'headless': effective_headless
+            }
+            
+            # Calculate timeout: 5 minutes base + 10s per comment, capped between 5 and 15 minutes
+            timeout_seconds = max(300, min(300 + (request.max_comments * 10), 900))
+            
+            logger.info("Starting scraping subprocess...")
+            result = await run_scraping_in_subprocess('scrape_comments', args_dict, timeout_seconds)
+            comments = result.get('comments', [])
+            logger.info(f"Scraping completed. Found {len(comments) if comments else 0} comments.")
+        except asyncio.TimeoutError as te:
+            logger.error(f"Scraping comments timed out")
+            raise HTTPException(
+                status_code=504,
+                detail={
+                    "error": "Scraping timeout",
+                    "message": "The scraping operation took too long and timed out. Try reducing max_comments parameter."
+                }
+            )
+        except Exception as e:
+            error_msg = str(e)
+            error_details = traceback.format_exc()
+            logger.error(f"Scraping comments failed: {error_msg}")
+            raise HTTPException(
+                status_code=500,
+                detail={
+                    "error": "Scraping failed",
+                    "message": error_msg,
+                    "details": error_details
+                }
+            )
+            
+        # Convert comments to response format
+        formatted_comments = []
+        for c in comments:
+            formatted_comments.append(CommentData(
+                commenter_name=c.get('commenter_name', ''),
+                commenter_profile_link=c.get('commenter_profile_link', ''),
+                comment_text=c.get('comment_text', '')
+            ))
+            
+        return ScrapeCommentsResponse(
+            success=True,
+            comments=formatted_comments,
+            count=len(formatted_comments),
+            message=f"Successfully scraped {len(formatted_comments)} comments"
         )
         
     except HTTPException:

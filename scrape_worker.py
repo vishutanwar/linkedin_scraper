@@ -36,36 +36,54 @@ def main():
     try:
         # Parse arguments from JSON
         args = json.loads(sys.argv[1])
+        action = args.get('action', 'scrape_posts')
         cookies_file = args['cookies_file']
         url = args['url']
         max_scroll = args.get('max_scroll', 5)
         scroll_delay = args.get('scroll_delay', 2)
         headless = args.get('headless', True)
         proxy = args.get('proxy', None)
+        max_comments = args.get('max_comments', 50)
         
         # Load cookies
         with open(cookies_file, 'r') as f:
             cookies = json.load(f)
         
-        # Create scraper and scrape
+        # Create scraper
         scraper = LinkedInScraper(cookies=cookies)
-        posts = scraper.scrape_posts(
-            url=url,
-            max_scroll=max_scroll,
-            scroll_delay=scroll_delay,
-            headless=headless,
-            proxy=proxy
-        )
         
-        # Restore stdout and output result as JSON
-        sys.stdout = original_stdout
-        result = {
-            "success": True,
-            "posts": posts,
-            "count": len(posts) if posts else 0
-        }
-        print(json.dumps(result), flush=True)
-        sys.exit(0)
+        if action == 'scrape_comments':
+            comments = scraper.scrape_comments(
+                post_url=url,
+                max_comments=max_comments,
+                headless=headless
+            )
+            # Restore stdout and output result as JSON
+            sys.stdout = original_stdout
+            result = {
+                "success": True,
+                "comments": comments,
+                "count": len(comments) if comments else 0
+            }
+            print(json.dumps(result), flush=True)
+            sys.exit(0)
+        else:
+            posts = scraper.scrape_posts(
+                url=url,
+                max_scroll=max_scroll,
+                scroll_delay=scroll_delay,
+                headless=headless,
+                proxy=proxy
+            )
+            # Restore stdout and output result as JSON
+            sys.stdout = original_stdout
+            result = {
+                "success": True,
+                "posts": posts,
+                "count": len(posts) if posts else 0
+            }
+            print(json.dumps(result), flush=True)
+            sys.exit(0)
         
     except Exception as e:
         # Restore stdout and output JSON error result

@@ -15,6 +15,7 @@ import time
 import platform
 import signal
 import random
+import os
 from typing import List, Dict, Optional
 from playwright.sync_api import sync_playwright, Browser, Page, Cookie
 
@@ -2340,6 +2341,241 @@ class LinkedInScraper:
             print(f"Error in _extract_single_post: {str(e)}")
             return None
     
+    def scrape_comments(self, post_url: str, max_comments: int = 50, headless: bool = True) -> List[Dict]:
+        """
+        Scrape comments from a specific LinkedIn post URL.
+        
+        Args:
+            post_url: The URL of the LinkedIn post
+            max_comments: Maximum number of comments to extract
+            headless: Run browser in headless mode
+            
+        Returns:
+            List[Dict]: List of extracted comments
+        """
+        print(f"SCRAPER: Starting scrape_comments method for URL: {post_url}", flush=True)
+        comments = []
+        
+        from playwright.sync_api import sync_playwright
+        
+        playwright_path = os.environ.get('PLAYWRIGHT_BROWSERS_PATH', os.path.expanduser('~/.cache/ms-playwright'))
+        print(f"SCRAPER: PLAYWRIGHT_BROWSERS_PATH={playwright_path}", flush=True)
+        
+        with sync_playwright() as p:
+            # Configure browser launch options
+            launch_args = {
+                'headless': headless,
+                'slow_mo': 100,
+                'args': [
+                    '--no-sandbox',
+                    '--disable-setuid-sandbox',
+                    '--disable-blink-features=AutomationControlled',
+                    '--disable-dev-shm-usage',
+                    '--disable-gpu',
+                    '--disable-software-rasterizer'
+                ]
+            }
+            
+            print("SCRAPER: Launching browser...", flush=True)
+            browser = p.chromium.launch(**launch_args)
+            context = browser.new_context(
+                viewport={'width': 1280, 'height': 1080},
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            )
+            
+            # Apply cookies
+            if self.cookies:
+                print("SCRAPER: Applying cookies...", flush=True)
+                context.add_cookies(self.cookies)
+                
+            page = context.new_page()
+            
+            # Navigate to login page first to establish session
+            print("SCRAPER: Navigating to login page to establish session...", flush=True)
+            try:
+                page.goto("https://www.linkedin.com/login", wait_until="domcontentloaded", timeout=60000)
+            except Exception as e:
+                print(f"SCRAPER: Login page navigation error: {str(e)}", flush=True)
+                
+            # Handle login/checkpoint page
+            print("Checking for account selection/login/checkpoint page...", flush=True)
+            current_url_before = page.url
+            self._handle_account_selection(page)
+            
+            # If we're on a checkpoint/login page, try to wait and see if it redirects
+            if '/checkpoint' in current_url_before or '/login' in current_url_before or '/signup' in current_url_before:
+                print("⚠️ On checkpoint/login page. Waiting to see if cookies allow auto-redirect...", flush=True)
+                time.sleep(5)
+                current_url_after = page.url
+                if current_url_after != current_url_before:
+                    print(f"✅ Page redirected from {current_url_before[:80]} to {current_url_after[:80]}", flush=True)
+                else:
+                    print(f"⚠️ Still on checkpoint/login page. Cookies may not work with this proxy IP.", flush=True)
+            
+            # Wait for page to settle
+            print("Waiting for page content to load...", flush=True)
+            time.sleep(5)
+            
+            # Now navigate to the target post URL
+            print(f"SCRAPER: Navigating to target post URL: {post_url}...", flush=True)
+            try:
+                response = page.goto(post_url, wait_until="domcontentloaded", timeout=60000)
+                print(f"SCRAPER: Navigated to post. Status: {response.status if response else 'unknown'}", flush=True)
+            except Exception as e:
+                print(f"SCRAPER: Post navigation error: {str(e)}", flush=True)
+                
+            # Wait for post page to load
+            time.sleep(5)
+            
+            # Wait for comments section to load
+            page.wait_for_timeout(3000)
+            
+            # Scroll down to ensure comments are visible
+            page.evaluate("window.scrollTo(0, document.body.scrollHeight / 2);")
+            page.wait_for_timeout(1000)
+            
+            # Try to expand comments
+            try:
+                sort_dropdown = page.query_selector('button[aria-label*="comments sorting"], [class*="comments-sort"]')
+                if sort_dropdown:
+                    print("SCRAPER: Found comment sorting dropdown, opening...", flush=True)
+                    sort_dropdown.click()
+                    page.wait_for_timeout(1000)
+                    # Try to select "Most recent" or "All comments"
+                    all_comments_option = page.query_selector('text="Most recent", text="All comments", [data-control-name="sort_newest"]')
+                    if all_comments_option:
+                        print("SCRAPER: Selecting All/Most recent comments...", flush=True)
+                        all_comments_option.click()
+                        page.wait_for_timeout(2000)
+            except Exception as e:
+                print(f"SCRAPER: Error changing comment sort: {str(e)}", flush=True)
+                
+            # Loop to click "Load more comments" or "Show more comments"
+            print("SCRAPER: Expanding comments section...", flush=True)
+            load_more_attempts = 0
+            max_attempts = 15
+            
+            while load_more_attempts < max_attempts:
+                # Count current comments
+                current_count = len(page.query_selector_all('[componentkey*="urn:li:comment:"], [data-id*="urn:li:comment:"], .comments-comment-entity'))
+                print(f"SCRAPER: Current comment count in DOM: {current_count}", flush=True)
+                if current_count >= max_comments:
+                    break
+                    
+                # Look for load more button
+                load_more_btn = page.query_selector(
+                    'button:has-text("Load more comments"), '
+                    'button:has-text("Show more comments"), '
+                    'button:has-text("Load more"), '
+                    'button[class*="comments-retrieve-button"], '
+                    'button[class*="comments-show-more-button"]'
+                )
+                
+                if load_more_btn and load_more_btn.is_visible():
+                    print("SCRAPER: Clicking 'Load more comments' button...", flush=True)
+                    try:
+                        load_more_btn.click()
+                        page.wait_for_timeout(2000)
+                        load_more_attempts += 1
+                    except Exception as e:
+                        print(f"SCRAPER: Click failed: {str(e)}", flush=True)
+                        break
+                else:
+                    print("SCRAPER: No 'Load more comments' button found or visible.", flush=True)
+                    break
+                    
+            # Extract comments
+            print("SCRAPER: Extracting comments...", flush=True)
+            all_containers = page.query_selector_all('[componentkey*="urn:li:comment:"], [data-id*="urn:li:comment:"], .comments-comment-entity')
+            
+            # Filter out nested comments to avoid duplicates
+            comment_containers = []
+            for c in all_containers:
+                parent = c.query_selector('xpath=..')
+                is_nested = False
+                while parent:
+                    try:
+                        p_key = parent.get_attribute('componentkey') or ''
+                        p_id = parent.get_attribute('data-id') or ''
+                        p_class = parent.get_attribute('class') or ''
+                        if ('urn:li:comment:' in p_key) or ('urn:li:comment:' in p_id) or ('comments-comment-entity' in p_class):
+                            is_nested = True
+                            break
+                    except:
+                        pass
+                    parent = parent.query_selector('xpath=..')
+                if not is_nested:
+                    comment_containers.append(c)
+                    
+            print(f"SCRAPER: Found {len(comment_containers)} top-level comments to process.", flush=True)
+            
+            # Process each comment
+            for idx, c_container in enumerate(comment_containers[:max_comments]):
+                try:
+                    commenter_name = ''
+                    commenter_profile = ''
+                    
+                    # Find all links in the container (first one that's not a mention)
+                    all_links = c_container.query_selector_all('a[href*="/in/"], a[href*="/company/"]')
+                    for link in all_links:
+                        # Skip mentions inside the comment body
+                        if link.evaluate('el => el.closest("[data-testid=\'expandable-text-box\']")') or \
+                           link.evaluate('el => el.closest(".comments-comment-item__main-content")') or \
+                           link.evaluate('el => el.closest(".comments-comment-item__inline-show-more-text")') or \
+                           link.evaluate('el => el.closest(".update-components-text")'):
+                            continue
+                            
+                        name_elem = link.query_selector('.comments-comment-meta__description-title, [aria-hidden="true"]')
+                        if name_elem:
+                            raw_name = name_elem.inner_text().strip()
+                        else:
+                            raw_name = link.inner_text().strip()
+                            
+                        if raw_name:
+                            import re
+                            commenter_name = re.split(r'\n|•|·|Author|,', raw_name)[0].strip()
+                            commenter_profile = link.get_attribute('href') or ''
+                            if commenter_profile:
+                                if '?' in commenter_profile:
+                                    commenter_profile = commenter_profile.split('?')[0]
+                                if not commenter_profile.startswith('http') and commenter_profile.startswith('/'):
+                                    commenter_profile = f"https://www.linkedin.com{commenter_profile}"
+                            break
+                            
+                    # Extract comment text
+                    comment_text = ''
+                    text_elem = c_container.query_selector(
+                        '.comments-comment-item__main-content, '
+                        '.comments-comment-item__inline-show-more-text, '
+                        '.update-components-text, '
+                        '[data-testid="expandable-text-box"]'
+                    )
+                    if text_elem:
+                        more_btn = text_elem.query_selector('button')
+                        clean_text = text_elem.inner_text().strip()
+                        if more_btn:
+                            more_text = more_btn.inner_text().strip()
+                            if clean_text.endswith(more_text):
+                                clean_text = clean_text[:-len(more_text)].strip()
+                            if clean_text.endswith('…'):
+                                clean_text = clean_text[:-1].strip()
+                        import re
+                        comment_text = re.sub(r'\s+', ' ', clean_text).strip()
+                        
+                    if commenter_name and comment_text:
+                        comments.append({
+                            'commenter_name': commenter_name,
+                            'commenter_profile_link': commenter_profile,
+                            'comment_text': comment_text
+                        })
+                except Exception as ce:
+                    print(f"SCRAPER: Error processing comment {idx}: {str(ce)}", flush=True)
+                    
+            browser.close()
+            
+        print(f"SCRAPER: Successfully extracted {len(comments)} comments.", flush=True)
+        return comments
+
     def save_to_json(self, filename: str = 'linkedin_posts.json'):
         """
         Save scraped posts to a JSON file.
