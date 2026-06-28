@@ -1571,12 +1571,11 @@ class LinkedInScraper:
                                 if (allText.length < 50 || allText.length > 50000) continue;
                                 
                                 // Find profile link - MUST be a real profile, not job opportunities
-                                var profileSelector = 'a[href*="/in/"][href*="linkedin.com/in"]';
-                                var allProfileLinks = Array.prototype.slice.call(elem.querySelectorAll(profileSelector));
                                 var profileLink = '';
                                 var actorLink = null;
                                 
-                                // Prioritize actor/profile links
+                                // Find all profile links in the container
+                                var allProfileLinks = elem.querySelectorAll('a[href*="/in/"], a[href*="/company/"]');
                                 for (var pl = 0; pl < allProfileLinks.length; pl++) {
                                     var link = allProfileLinks[pl];
                                     var href = link.href || link.getAttribute('href') || '';
@@ -1584,27 +1583,13 @@ class LinkedInScraper:
                                     // EXCLUDE job opportunity links
                                     if (href.indexOf('/opportunities/') >= 0 || href.indexOf('/jobs/') >= 0) continue;
                                     
-                                    // Only accept actual profile links
-                                    if (href.indexOf('/in/') >= 0 && href.indexOf('linkedin.com/in/') >= 0) {
-                                        var viewName = link.getAttribute('data-view-name') || '';
-                                        var componentKey = link.getAttribute('componentkey') || '';
-                                        
-                                        // Prioritize actor links
-                                        if (viewName.indexOf('actor') >= 0 || viewName.indexOf('profile') >= 0 || 
-                                            componentKey.indexOf('actor') >= 0) {
-                                            actorLink = link;
-                                            break;
-                                        }
-                                        // Otherwise use first valid profile link
-                                        if (!profileLink) {
-                                            profileLink = href;
-                                        }
+                                    // The first link with text is our actor link (author)
+                                    var linkText = (link.innerText || '').trim();
+                                    if (linkText) {
+                                        actorLink = link;
+                                        profileLink = href;
+                                        break;
                                     }
-                                }
-                                
-                                // Use actor link if found
-                                if (actorLink) {
-                                    profileLink = actorLink.href || actorLink.getAttribute('href') || '';
                                 }
                                 
                                 // Clean profile link
@@ -1621,61 +1606,14 @@ class LinkedInScraper:
                                 }
                                 
                                 // MUST have a valid profile link to be a post
-                                if (!profileLink || profileLink.indexOf('/in/') < 0) continue;
+                                if (!profileLink) continue;
                                 
-                                // Extract name - look for <p> tags near the profile link
+                                // Extract name directly from the actor link text
                                 var name = '';
                                 if (actorLink) {
-                                    // Find name in parent of actor link
-                                    var linkParent = actorLink.parentElement;
-                                    if (linkParent) {
-                                        var nameParagraphs = linkParent.querySelectorAll('p');
-                                        for (var np = 0; np < Math.min(nameParagraphs.length, 5); np++) {
-                                            var pText = (nameParagraphs[np].innerText || nameParagraphs[np].textContent || '').trim();
-                                            var firstLine = pText.split('\\n')[0].split('•')[0].split('|')[0].trim();
-                                            
-                                            // Filter out UI text and job titles
-                                            if (firstLine && firstLine.length >= 2 && firstLine.length <= 60 &&
-                                                /^[A-Za-z\\s\\-\\.']+$/.test(firstLine) &&
-                                                firstLine.indexOf('ago') < 0 && firstLine.indexOf('min') < 0 &&
-                                                firstLine.indexOf('hour') < 0 && firstLine.indexOf('day') < 0 &&
-                                                firstLine.indexOf('Like') < 0 && firstLine.indexOf('Comment') < 0 &&
-                                                firstLine.indexOf('Share') < 0 && firstLine.indexOf('Follow') < 0 &&
-                                                firstLine.indexOf('View') < 0 && firstLine.indexOf('Only') < 0 &&
-                                                firstLine.indexOf('connections') < 0 && firstLine.indexOf('reactions') < 0 &&
-                                                firstLine.indexOf('comments') < 0 && firstLine.indexOf('reposts') < 0 &&
-                                                firstLine.indexOf('Developer') < 0 && firstLine.indexOf('Engineer') < 0 &&
-                                                firstLine.indexOf('at ') < 0 && firstLine.indexOf('Recruiter') < 0 &&
-                                                firstLine.indexOf('Hiring') < 0 && firstLine.indexOf('Looking for') < 0 &&
-                                                firstLine.indexOf('open to work') < 0 && firstLine.toLowerCase().indexOf('is open') < 0) {
-                                                name = firstLine.substring(0, 100);
-                                                break;
-                                            }
-                                        }
-                                    }
-                                }
-                                
-                                // If no name found, try extracting from text (first line that looks like a name)
-                                if (!name) {
-                                    var textLines = allText.split('\\n');
-                                    for (var t = 0; t < Math.min(textLines.length, 5); t++) {
-                                        var line = textLines[t].trim();
-                                        var cleanLine = line.split('•')[0].split('|')[0].trim();
-                                        if (cleanLine && cleanLine.length >= 2 && cleanLine.length <= 60 &&
-                                            /^[A-Za-z\\s\\-\\.']+$/.test(cleanLine) &&
-                                            cleanLine.indexOf('ago') < 0 && cleanLine.indexOf('min') < 0 &&
-                                            cleanLine.indexOf('Like') < 0 && cleanLine.indexOf('Comment') < 0 &&
-                                            cleanLine.indexOf('Developer') < 0 && cleanLine.indexOf('Engineer') < 0 &&
-                                            cleanLine.indexOf('at ') < 0 && cleanLine.indexOf('Recruiter') < 0 &&
-                                            cleanLine.indexOf('Hiring') < 0 && cleanLine.indexOf('Looking for') < 0 &&
-                                            cleanLine.toLowerCase().indexOf('open to work') < 0 &&
-                                            cleanLine.toLowerCase().indexOf('is open') < 0 &&
-                                            cleanLine.indexOf('Only connections') < 0 &&
-                                            cleanLine.indexOf('View job') < 0 &&
-                                            cleanLine.indexOf('Your feedback') < 0) {
-                                            name = cleanLine.substring(0, 100);
-                                            break;
-                                        }
+                                    var rawNameText = (actorLink.innerText || '').trim();
+                                    if (rawNameText) {
+                                        name = rawNameText.split('\\n')[0].split('•')[0].split('·')[0].split('Author')[0].split(',')[0].trim();
                                     }
                                 }
                                 
