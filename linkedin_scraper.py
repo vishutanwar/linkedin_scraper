@@ -2390,39 +2390,29 @@ class LinkedInScraper:
                 
             page = context.new_page()
             
-            # Navigate to login page first to establish session
-            print("SCRAPER: Navigating to login page to establish session...", flush=True)
-            try:
-                page.goto("https://www.linkedin.com/login", wait_until="domcontentloaded", timeout=60000)
-            except Exception as e:
-                print(f"SCRAPER: Login page navigation error: {str(e)}", flush=True)
-                
-            # Handle login/checkpoint page
-            print("Checking for account selection/login/checkpoint page...", flush=True)
-            current_url_before = page.url
-            self._handle_account_selection(page)
+            page = context.new_page()
             
-            # If we're on a checkpoint/login page, try to wait and see if it redirects
-            if '/checkpoint' in current_url_before or '/login' in current_url_before or '/signup' in current_url_before:
-                print("⚠️ On checkpoint/login page. Waiting to see if cookies allow auto-redirect...", flush=True)
-                time.sleep(5)
-                current_url_after = page.url
-                if current_url_after != current_url_before:
-                    print(f"✅ Page redirected from {current_url_before[:80]} to {current_url_after[:80]}", flush=True)
-                else:
-                    print(f"⚠️ Still on checkpoint/login page. Cookies may not work with this proxy IP.", flush=True)
-            
-            # Wait for page to settle
-            print("Waiting for page content to load...", flush=True)
-            time.sleep(5)
-            
-            # Now navigate to the target post URL
-            print(f"SCRAPER: Navigating to target post URL: {post_url}...", flush=True)
+            # Navigate directly to the target post URL
+            print(f"SCRAPER: Navigating directly to target post URL: {post_url}...", flush=True)
             try:
                 response = page.goto(post_url, wait_until="domcontentloaded", timeout=60000)
-                print(f"SCRAPER: Navigated to post. Status: {response.status if response else 'unknown'}", flush=True)
+                status_code = response.status if response else 200
+                print(f"SCRAPER: Navigated to post. Status: {status_code}", flush=True)
             except Exception as e:
                 print(f"SCRAPER: Post navigation error: {str(e)}", flush=True)
+                status_code = 500
+                
+            # Check if we were blocked (status 999) or redirected
+            final_url = page.url
+            print(f"SCRAPER: Final URL: {final_url}, Status: {status_code}", flush=True)
+            
+            if status_code == 999:
+                browser.close()
+                raise Exception("LinkedIn blocked the request (status 999). This indicates that the session was not authenticated or LinkedIn detected bot activity. Please check or update your cookies.")
+                
+            if 'login' in final_url or 'signup' in final_url or 'checkpoint' in final_url:
+                browser.close()
+                raise Exception("LinkedIn redirected to a login, signup, or checkpoint page. This indicates your cookies are invalid, expired, or a security challenge was triggered. Please update linkedin_cookies.json on the server.")
                 
             # Wait for post page to load
             time.sleep(5)
@@ -2622,42 +2612,15 @@ class LinkedInScraper:
                 
             page = context.new_page()
             
-            # Navigate to login page first to establish session (smart login)
-            print("SCRAPER: Navigating to login page to establish session...", flush=True)
-            try:
-                page.goto("https://www.linkedin.com/login", wait_until="domcontentloaded", timeout=60000)
-                page.wait_for_timeout(2000)
-            except Exception as e:
-                print(f"SCRAPER: Login page navigation error: {str(e)}", flush=True)
-                
-            current_url = page.url
-            print(f"SCRAPER: Current URL after login page: {current_url}", flush=True)
-            
-            if '/feed' not in current_url:
-                print("Checking for account selection/login/checkpoint page...", flush=True)
-                try:
-                    self._handle_account_selection(page)
-                except Exception as e:
-                    print(f"SCRAPER: Account selection helper error: {str(e)}", flush=True)
-                
-                print("SCRAPER: Waiting for login redirect to complete...", flush=True)
-                try:
-                    page.wait_for_url("**/feed*", timeout=15000)
-                    print("✅ SCRAPER: Login redirect completed successfully!", flush=True)
-                except Exception as e:
-                    print(f"SCRAPER: Login redirect did not complete: {str(e)}", flush=True)
-                    # Wait a bit more as fallback
-                    page.wait_for_timeout(5000)
-            else:
-                print("SCRAPER: Already logged in (session active).", flush=True)
-                
-            # Navigate to profile URL
-            print(f"SCRAPER: Navigating to profile URL: {profile_url}...", flush=True)
+            # Navigate directly to profile URL
+            print(f"SCRAPER: Navigating directly to profile URL: {profile_url}...", flush=True)
             try:
                 response = page.goto(profile_url, wait_until="domcontentloaded", timeout=60000)
-                print(f"SCRAPER: Navigated. Status: {response.status if response else 'unknown'}", flush=True)
+                status_code = response.status if response else 200
+                print(f"SCRAPER: Navigated. Status: {status_code}", flush=True)
             except Exception as e:
                 print(f"SCRAPER: Profile navigation error: {str(e)}", flush=True)
+                status_code = 500
                 
             # Check if we were blocked (status 999) or redirected
             final_url = page.url
