@@ -2576,6 +2576,249 @@ class LinkedInScraper:
         print(f"SCRAPER: Successfully extracted {len(comments)} comments.", flush=True)
         return comments
 
+    def scrape_profile(self, profile_url: str, headless: bool = True) -> Dict:
+        """
+        Scrape profile details from a specific LinkedIn profile URL.
+        
+        Args:
+            profile_url: The URL of the LinkedIn profile
+            headless: Run browser in headless mode
+            
+        Returns:
+            Dict: Scraped profile data
+        """
+        print(f"SCRAPER: Starting scrape_profile method for URL: {profile_url}", flush=True)
+        profile_data = {}
+        
+        from playwright.sync_api import sync_playwright
+        
+        playwright_path = os.environ.get('PLAYWRIGHT_BROWSERS_PATH', os.path.expanduser('~/.cache/ms-playwright'))
+        print(f"SCRAPER: PLAYWRIGHT_BROWSERS_PATH={playwright_path}", flush=True)
+        
+        with sync_playwright() as p:
+            launch_args = {
+                'headless': headless,
+                'slow_mo': 100,
+                'args': [
+                    '--no-sandbox',
+                    '--disable-setuid-sandbox',
+                    '--disable-blink-features=AutomationControlled',
+                    '--disable-dev-shm-usage',
+                    '--disable-gpu',
+                    '--disable-software-rasterizer'
+                ]
+            }
+            
+            print("SCRAPER: Launching browser...", flush=True)
+            browser = p.chromium.launch(**launch_args)
+            context = browser.new_context(
+                viewport={'width': 1280, 'height': 1080},
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            )
+            
+            if self.cookies:
+                print("SCRAPER: Applying cookies...", flush=True)
+                context.add_cookies(self.cookies)
+                
+            page = context.new_page()
+            
+            # Navigate to home page first to establish session (smart login)
+            print("SCRAPER: Navigating to home page to establish session...", flush=True)
+            try:
+                page.goto("https://www.linkedin.com", wait_until="domcontentloaded", timeout=60000)
+                page.wait_for_timeout(2000)
+            except Exception as e:
+                print(f"SCRAPER: Home page navigation error: {str(e)}", flush=True)
+                
+            current_url = page.url
+            print(f"SCRAPER: Current URL after home page: {current_url}", flush=True)
+            
+            if '/feed' not in current_url:
+                print("Checking for account selection/login/checkpoint page...", flush=True)
+                self._handle_account_selection(page)
+                page.wait_for_timeout(5000)
+            else:
+                print("SCRAPER: Already logged in (session active).", flush=True)
+                
+            # Navigate to profile URL
+            print(f"SCRAPER: Navigating to profile URL: {profile_url}...", flush=True)
+            try:
+                response = page.goto(profile_url, wait_until="domcontentloaded", timeout=60000)
+                print(f"SCRAPER: Navigated. Status: {response.status if response else 'unknown'}", flush=True)
+            except Exception as e:
+                print(f"SCRAPER: Profile navigation error: {str(e)}", flush=True)
+                
+            page.wait_for_timeout(5000)
+            
+            # Scroll down to trigger lazy loading of sections
+            print("SCRAPER: Scrolling to trigger lazy loading...", flush=True)
+            for i in range(10):
+                # Scroll window
+                page.evaluate(f"window.scrollTo(0, {i * 1000});")
+                # Scroll LazyColumn container (for mobile-web layout)
+                page.evaluate("""
+                    const el = document.querySelector('[data-testid="lazy-column"]');
+                    if (el) {
+                        el.scrollTop = el.scrollTop + 1000;
+                    }
+                """)
+                page.wait_for_timeout(1500)
+                
+            # Extract profile data
+            print("SCRAPER: Extracting profile data...", flush=True)
+            try:
+                profile_data = page.evaluate("""
+                    (() => {
+                        var result = {
+                            name: '',
+                            headline: '',
+                            location: '',
+                            profile_pic_url: '',
+                            about: '',
+                            experience: [],
+                            education: [],
+                            skills: []
+                        };
+                        
+                        var title = document.title || '';
+                        if (title.indexOf(' | ') >= 0) {
+                            result.name = title.split(' | ')[0].trim();
+                        }
+                        
+                        var nameElem = document.querySelector('h1, h2[class*="d1eb3d0c"], [class*="top-card"] h1, [class*="top-card"] h2');
+                        if (nameElem) {
+                            result.name = nameElem.innerText.trim();
+                        }
+                        
+                        var headlineElem = document.querySelector('p[class*="_67dbe9ff"], .text-body-medium, [class*="headline"], [class*="top-card"] p');
+                        if (headlineElem) {
+                            result.headline = headlineElem.innerText.trim();
+                        }
+                        
+                        var locationElem = document.querySelector('p[class*="_1d64634e"], .text-body-small, [class*="location"]');
+                        if (locationElem) {
+                            result.location = locationElem.innerText.trim();
+                        }
+                        
+                        var imgElem = document.querySelector('img[class*="profile-picture"], img[class*="avatar"], [class*="top-card"] img[alt*="profile"], [class*="top-card"] img[alt*="photo"]');
+                        if (imgElem) {
+                            result.profile_pic_url = imgElem.src || imgElem.getAttribute('src') || '';
+                        }
+                        
+                        var sections = document.querySelectorAll('section');
+                        for (var i = 0; i < sections.length; i++) {
+                            var sec = sections[i];
+                            var heading = sec.querySelector('h2, h3, h4');
+                            if (!heading) continue;
+                            
+                            var headingText = heading.innerText.trim().toLowerCase();
+                            
+                            if (headingText.indexOf('about') >= 0 || headingText.indexOf('summary') >= 0) {
+                                var p = sec.querySelector('p, div[class*="break-words"]');
+                                if (p) {
+                                    result.about = p.innerText.trim();
+                                }
+                            }
+                            else if (headingText.indexOf('experience') >= 0 || headingText.indexOf('work') >= 0) {
+                                var items = sec.querySelectorAll('li, [class*="experience-item"], [class*="position-item"]');
+                                if (items.length === 0) {
+                                    items = sec.querySelectorAll('div > div > div');
+                                }
+                                
+                                var seenTitles = {};
+                                for (var j = 0; j < items.length; j++) {
+                                    var item = items[j];
+                                    if (item.querySelector('li')) continue;
+                                    
+                                    var titleText = '';
+                                    var companyText = '';
+                                    var durationText = '';
+                                    var descText = '';
+                                    
+                                    var tElem = item.querySelector('[class*="title"], .t-bold, h3, h4');
+                                    var cElem = item.querySelector('[class*="company"], .t-normal, [class*="subtitle"]');
+                                    var dElem = item.querySelector('[class*="duration"], [class*="date"], .t-black--light');
+                                    var descElem = item.querySelector('[class*="description"], p, [class*="summary"]');
+                                    
+                                    if (tElem) titleText = tElem.innerText.trim();
+                                    if (cElem) companyText = cElem.innerText.trim();
+                                    if (dElem) durationText = dElem.innerText.trim();
+                                    if (descElem) descText = descElem.innerText.trim();
+                                    
+                                    if (companyText && titleText && companyText.indexOf(titleText) >= 0) {
+                                        companyText = companyText.replace(titleText, '').trim();
+                                    }
+                                    
+                                    if (companyText) {
+                                        companyText = companyText.split('\\n')[0].split('•')[0].trim();
+                                    }
+                                    
+                                    if (titleText && !seenTitles[titleText + companyText]) {
+                                        seenTitles[titleText + companyText] = true;
+                                        result.experience.push({
+                                            title: titleText,
+                                            company: companyText,
+                                            duration: durationText,
+                                            description: descText
+                                        });
+                                    }
+                                }
+                            }
+                            else if (headingText.indexOf('education') >= 0 || headingText.indexOf('school') >= 0) {
+                                var items = sec.querySelectorAll('li, [class*="education-item"]');
+                                if (items.length === 0) {
+                                    items = sec.querySelectorAll('div > div > div');
+                                }
+                                
+                                var seenSchools = {};
+                                for (var j = 0; j < items.length; j++) {
+                                    var item = items[j];
+                                    if (item.querySelector('li')) continue;
+                                    
+                                    var schoolText = '';
+                                    var degreeText = '';
+                                    var durationText = '';
+                                    
+                                    var sElem = item.querySelector('[class*="school"], .t-bold, h3, h4');
+                                    var degElem = item.querySelector('[class*="degree"], .t-normal, [class*="study"]');
+                                    var dElem = item.querySelector('[class*="duration"], [class*="date"], .t-black--light');
+                                    
+                                    if (sElem) schoolText = sElem.innerText.trim();
+                                    if (degElem) degreeText = degElem.innerText.trim();
+                                    if (dElem) durationText = dElem.innerText.trim();
+                                    
+                                    if (schoolText && !seenSchools[schoolText + degreeText]) {
+                                        seenSchools[schoolText + degreeText] = true;
+                                        result.education.push({
+                                            school: schoolText,
+                                            degree: degreeText,
+                                            duration: durationText
+                                        });
+                                    }
+                                }
+                            }
+                            else if (headingText.indexOf('skills') >= 0 || headingText.indexOf('endorsements') >= 0) {
+                                var sItems = sec.querySelectorAll('span[class*="skill-name"], [class*="skill-title"], .t-bold');
+                                for (var j = 0; j < sItems.length; j++) {
+                                    var skillText = sItems[j].innerText.trim();
+                                    if (skillText && result.skills.indexOf(skillText) < 0 && skillText.toLowerCase() !== 'skills') {
+                                        result.skills.push(skillText);
+                                    }
+                                }
+                            }
+                        }
+                        
+                        return result;
+                    })()
+                """)
+            except Exception as ee:
+                print(f"SCRAPER: Extraction JS error: {str(ee)}", flush=True)
+                
+            browser.close()
+            
+        print("SCRAPER: Finished profile scraping.", flush=True)
+        return profile_data
+
     def save_to_json(self, filename: str = 'linkedin_posts.json'):
         """
         Save scraped posts to a JSON file.

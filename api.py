@@ -172,6 +172,56 @@ class ScrapeCommentsResponse(BaseModel):
     message: str
 
 
+class ExperienceData(BaseModel):
+    """Model for experience items."""
+    title: str = ""
+    company: str = ""
+    duration: str = ""
+    description: str = ""
+
+
+class EducationData(BaseModel):
+    """Model for education items."""
+    school: str = ""
+    degree: str = ""
+    duration: str = ""
+
+
+class ProfileData(BaseModel):
+    """Model for profile details."""
+    name: str = ""
+    headline: str = ""
+    location: str = ""
+    profile_pic_url: str = ""
+    about: str = ""
+    experience: List[ExperienceData] = []
+    education: List[EducationData] = []
+    skills: List[str] = []
+
+
+class ProfileRequest(BaseModel):
+    """Request model for scraping a profile."""
+    profile_url: HttpUrl = Field(..., description="LinkedIn profile URL to scrape")
+    headless: bool = Field(default=True, description="Run browser in headless mode")
+    cookies_file: str = Field(default="linkedin_cookies.json", description="Path to cookies JSON file (relative to app directory)")
+
+    @field_validator('profile_url')
+    @classmethod
+    def validate_profile_url(cls, v):
+        """Ensure URL is a LinkedIn URL."""
+        url_str = str(v)
+        if 'linkedin.com' not in url_str.lower():
+            raise ValueError("URL must be a LinkedIn URL")
+        return v
+
+
+class ProfileResponse(BaseModel):
+    """Response model for profile scraping."""
+    success: bool
+    profile: ProfileData
+    message: str
+
+
 class ErrorResponse(BaseModel):
     """Error response model."""
     success: bool = False
@@ -551,6 +601,137 @@ async def scrape_post_comments(
         )
 
 
+@app.post("/profile", response_model=ProfileResponse)
+async def scrape_linkedin_profile(
+    request: ProfileRequest,
+    api_key_verified: bool = Depends(verify_api_key)
+):
+    """
+    Scrape LinkedIn profile details from the provided URL.
+    
+    Note: Cookies are loaded from a local JSON file on the server (default: linkedin_cookies.json).
+    The cookies file must be present on the server.
+    
+    Args:
+        request: ProfileRequest containing profile URL and parameters
+        
+    Returns:
+        ProfileResponse with profile details
+        
+    Raises:
+        HTTPException: If scraping fails or request is invalid
+    """
+    try:
+        # Force headless mode in Docker/containerized environments
+        is_container = os.path.exists('/.dockerenv') or os.environ.get('DOCKER_CONTAINER') == 'true'
+        effective_headless = request.headless if not is_container else True
+        
+        if is_container and not request.headless:
+            logger.warning("headless=False requested but running in container. Forcing headless=True")
+            
+        logger.info(f"Received profile scrape request for URL: {request.profile_url}")
+        logger.info(f"Parameters: headless={effective_headless} (requested: {request.headless}, container: {is_container})")
+        logger.info(f"Using cookies file: {request.cookies_file}")
+        
+        # Check if cookies file exists
+        cookies_file_path = request.cookies_file
+        if not os.path.isabs(cookies_file_path):
+            cookies_file_path = os.path.join(os.path.dirname(__file__), cookies_file_path)
+            
+        if not os.path.exists(cookies_file_path):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Cookies file not found: {cookies_file_path}. Please ensure the cookies file exists on the server."
+            )
+            
+        try:
+            logger.info("Starting scraping process for profile...")
+            args_dict = {
+                'cookies_file': cookies_file_path,
+                'url': str(request.profile_url),
+                'headless': effective_headless
+            }
+            
+            # Timeout: 5 minutes (generous for scrolling and loading sections)
+            timeout_seconds = 300
+            
+            logger.info("Starting scraping subprocess...")
+            result = await run_scraping_in_subprocess('scrape_profile', args_dict, timeout_seconds)
+            profile = result.get('profile', {})
+            logger.info(f"Scraping completed. Profile name extracted: {profile.get('name', 'unknown')}")
+        except asyncio.TimeoutError as te:
+            logger.error("Scraping profile timed out")
+            raise HTTPException(
+                status_code=504,
+                detail={
+                    "error": "Scraping timeout",
+                    "message": "The scraping operation took too long and timed out. Try checking logs for browser initialization issues."
+                }
+            )
+        except Exception as e:
+            error_msg = str(e)
+            error_details = traceback.format_exc()
+            logger.error(f"Scraping profile failed: {error_msg}")
+            raise HTTPException(
+                status_code=500,
+                detail={
+                    "error": "Scraping failed",
+                    "message": error_msg,
+                    "details": error_details
+                }
+            )
+            
+        # Map experience and education lists to Pydantic models
+        formatted_experience = []
+        for exp in profile.get('experience', []):
+            formatted_experience.append(ExperienceData(
+                title=exp.get('title', ''),
+                company=exp.get('company', ''),
+                duration=exp.get('duration', ''),
+                description=exp.get('description', '')
+            ))
+            
+        formatted_education = []
+        for edu in profile.get('education', []):
+            formatted_education.append(EducationData(
+                school=edu.get('school', ''),
+                degree=edu.get('degree', ''),
+                duration=edu.get('duration', '')
+            ))
+            
+        profile_data = ProfileData(
+            name=profile.get('name', ''),
+            headline=profile.get('headline', ''),
+            location=profile.get('location', ''),
+            profile_pic_url=profile.get('profile_pic_url', ''),
+            about=profile.get('about', ''),
+            experience=formatted_experience,
+            education=formatted_education,
+            skills=profile.get('skills', [])
+        )
+        
+        return ProfileResponse(
+            success=True,
+            profile=profile_data,
+            message=f"Successfully scraped profile details for {profile_data.name}"
+        )
+        
+    except HTTPException:
+        # Re-raise HTTP exceptions
+        raise
+    except Exception as e:
+        # Catch any unexpected errors
+        error_details = traceback.format_exc()
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": "Unexpected error occurred",
+                "message": str(e),
+                "details": error_details
+            }
+        )
+
+
 @app.get("/")
 async def root():
     """Root endpoint with API information."""
@@ -560,6 +741,8 @@ async def root():
         "endpoints": {
             "health": "/health",
             "scrape": "/scrape (POST)",
+            "scrape-comments": "/scrape-comments (POST)",
+            "profile": "/profile (POST)",
             "docs": "/docs",
             "openapi": "/openapi.json"
         }

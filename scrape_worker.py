@@ -67,6 +67,19 @@ def main():
             }
             print(json.dumps(result), flush=True)
             sys.exit(0)
+        elif action == 'scrape_profile':
+            profile = scraper.scrape_profile(
+                profile_url=url,
+                headless=headless
+            )
+            # Restore stdout and output result as JSON
+            sys.stdout = original_stdout
+            result = {
+                "success": True,
+                "profile": profile
+            }
+            print(json.dumps(result), flush=True)
+            sys.exit(0)
         else:
             posts = scraper.scrape_posts(
                 url=url,
