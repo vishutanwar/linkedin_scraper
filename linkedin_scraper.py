@@ -2380,7 +2380,7 @@ class LinkedInScraper:
             browser = p.chromium.launch(**launch_args)
             context = browser.new_context(
                 viewport={'width': 1280, 'height': 1080},
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
             )
             
             # Apply cookies
@@ -2613,7 +2613,7 @@ class LinkedInScraper:
             browser = p.chromium.launch(**launch_args)
             context = browser.new_context(
                 viewport={'width': 1280, 'height': 1080},
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
             )
             
             if self.cookies:
@@ -2659,8 +2659,15 @@ class LinkedInScraper:
             except Exception as e:
                 print(f"SCRAPER: Profile navigation error: {str(e)}", flush=True)
                 
-            # Check if we were redirected to a login/signup/checkpoint page
+            # Check if we were blocked (status 999) or redirected
             final_url = page.url
+            status_code = response.status if response else 200
+            print(f"SCRAPER: Final URL: {final_url}, Status: {status_code}", flush=True)
+            
+            if status_code == 999:
+                browser.close()
+                raise Exception("LinkedIn blocked the request (status 999). This indicates that the session was not authenticated or LinkedIn detected bot activity. Please check or update your cookies.")
+                
             if 'login' in final_url or 'signup' in final_url or 'checkpoint' in final_url:
                 browser.close()
                 raise Exception("LinkedIn redirected to a login, signup, or checkpoint page. This indicates your cookies are invalid, expired, or a security challenge was triggered. Please update linkedin_cookies.json on the server.")
