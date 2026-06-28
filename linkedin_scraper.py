@@ -2622,16 +2622,16 @@ class LinkedInScraper:
                 
             page = context.new_page()
             
-            # Navigate to home page first to establish session (smart login)
-            print("SCRAPER: Navigating to home page to establish session...", flush=True)
+            # Navigate to login page first to establish session (smart login)
+            print("SCRAPER: Navigating to login page to establish session...", flush=True)
             try:
-                page.goto("https://www.linkedin.com", wait_until="domcontentloaded", timeout=60000)
+                page.goto("https://www.linkedin.com/login", wait_until="domcontentloaded", timeout=60000)
                 page.wait_for_timeout(2000)
             except Exception as e:
-                print(f"SCRAPER: Home page navigation error: {str(e)}", flush=True)
+                print(f"SCRAPER: Login page navigation error: {str(e)}", flush=True)
                 
             current_url = page.url
-            print(f"SCRAPER: Current URL after home page: {current_url}", flush=True)
+            print(f"SCRAPER: Current URL after login page: {current_url}", flush=True)
             
             if '/feed' not in current_url:
                 print("Checking for account selection/login/checkpoint page...", flush=True)
