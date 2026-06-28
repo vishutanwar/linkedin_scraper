@@ -1568,24 +1568,13 @@ class LinkedInScraper:
                             var elem = postContainers[i];
                             try {
                                 // Get all text from this container
-                                // Clone the element and remove comments/social action bars before extracting text
-                                var cleanElem = elem.cloneNode(true);
-                                var toRemove = cleanElem.querySelectorAll([
-                                    '.comments-comment-item',
-                                    '.comments-comments-list',
-                                    '[class*="comments-list"]',
-                                    '.feed-shared-social-action-bar',
-                                    '[class*="social-action-bar"]',
-                                    '.comments-comment-box',
-                                    '[class*="comment-box"]',
-                                    '.feed-shared-update-v2__comments-container',
-                                    '[class*="comments-container"]'
-                                ].join(','));
-                                for (var tr = 0; tr < toRemove.length; tr++) {
-                                    toRemove[tr].remove();
+                                var textElem = elem.querySelector('.feed-shared-update-v2__description, [data-testid="expandable-text-box"], .update-components-text');
+                                var allText = '';
+                                if (textElem) {
+                                    allText = (textElem.innerText || '').trim();
+                                } else {
+                                    allText = (elem.innerText || '').trim();
                                 }
-                                
-                                var allText = (cleanElem.innerText || cleanElem.textContent || '').trim();
                                 
                                 // Skip if too short or too long (likely not a post)
                                 if (allText.length < 50 || allText.length > 50000) continue;
