@@ -16,7 +16,11 @@ import sys
 import logging
 import json
 import subprocess
+from dotenv import load_dotenv
 from linkedin_scraper import LinkedInScraper
+
+# Load environment variables from .env file
+load_dotenv()
 
 # Note: We use subprocess.Popen instead of ProcessPoolExecutor
 # to avoid Playwright's driver process communication issues
@@ -123,6 +127,7 @@ class PostData(BaseModel):
     name: str
     profile_link: str
     job_application_link: str
+    post_link: str = ""
     image_links: List[str]
 
 
@@ -324,10 +329,22 @@ async def scrape_linkedin_posts(
                 proxy_config  # Proxy configuration
             )
             
-            # Calculate timeout: (max_scroll * scroll_delay) + 120 seconds buffer
-            # Minimum 10 minutes, maximum 30 minutes
-            calculated_timeout = (request.max_scroll * request.scroll_delay) + 120
-            timeout_seconds = max(600, min(calculated_timeout, 1800))  # 10-30 minutes
+            # Calculate timeout: Account for actual wait times per scroll
+            # Each scroll takes: scroll_delay + random(0-3) + 2s wait + additional scroll wait + overhead
+            # For high scroll counts (>=25), use very generous calculation to allow up to 30 minutes
+            # Formula varies by scroll count to ensure high scroll counts can use full 30 minutes
+            # Minimum 5 minutes, maximum 30 minutes
+            if request.max_scroll >= 25:
+                # For very high scroll counts (25+), use very generous estimate to allow up to 30 minutes
+                # Use: (max_scroll * 50) + 300, which for 30 scrolls = 1800s = 30 min (capped at 30 min)
+                estimated_time_per_scroll = 50  # Very generous: 50 seconds per scroll for high counts
+            elif request.max_scroll >= 20:
+                # For high scroll counts, be generous
+                estimated_time_per_scroll = request.scroll_delay + 12
+            else:
+                estimated_time_per_scroll = request.scroll_delay + 8
+            calculated_timeout = (request.max_scroll * estimated_time_per_scroll) + 300
+            timeout_seconds = max(300, min(calculated_timeout, 1800))  # 5-30 minutes
             
             # Use subprocess instead of ProcessPoolExecutor to avoid Playwright issues
             # ProcessPoolExecutor can cause Playwright's driver process to hang
@@ -336,8 +353,14 @@ async def scrape_linkedin_posts(
             posts = await run_scraping_in_subprocess(scrape_args, timeout_seconds)
             logger.info(f"Scraping completed. Found {len(posts) if posts else 0} posts.")
         except asyncio.TimeoutError as te:
-            calculated_timeout = (request.max_scroll * request.scroll_delay) + 120
-            timeout_seconds = max(600, min(calculated_timeout, 1800))
+            if request.max_scroll >= 25:
+                estimated_time_per_scroll = 50  # Very generous: 50 seconds per scroll for high counts
+            elif request.max_scroll >= 20:
+                estimated_time_per_scroll = request.scroll_delay + 12
+            else:
+                estimated_time_per_scroll = request.scroll_delay + 8
+            calculated_timeout = (request.max_scroll * estimated_time_per_scroll) + 300
+            timeout_seconds = max(300, min(calculated_timeout, 1800))
             timeout_minutes = timeout_seconds / 60
             logger.error(f"Scraping timed out after {timeout_minutes:.1f} minutes")
             raise HTTPException(
@@ -428,12 +451,14 @@ async def shutdown_event():
 
 if __name__ == "__main__":
     import uvicorn
-    # Increase timeout for long-running scraping requests (10 minutes)
+    # Increase timeout for long-running scraping requests (30 minutes)
+    # These timeouts control HTTP connection keep-alive, not the scraping operation itself
     uvicorn.run(
         app, 
         host="0.0.0.0", 
         port=8000,
-        timeout_keep_alive=300,
-        timeout_graceful_shutdown=300
+        timeout_keep_alive=1800,  # 30 minutes - allow long-running requests
+        timeout_graceful_shutdown=300  # 5 minutes for graceful shutdown
     )
+
 
