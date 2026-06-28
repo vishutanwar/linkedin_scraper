@@ -2635,8 +2635,19 @@ class LinkedInScraper:
             
             if '/feed' not in current_url:
                 print("Checking for account selection/login/checkpoint page...", flush=True)
-                self._handle_account_selection(page)
-                page.wait_for_timeout(5000)
+                try:
+                    self._handle_account_selection(page)
+                except Exception as e:
+                    print(f"SCRAPER: Account selection helper error: {str(e)}", flush=True)
+                
+                print("SCRAPER: Waiting for login redirect to complete...", flush=True)
+                try:
+                    page.wait_for_url("**/feed*", timeout=15000)
+                    print("✅ SCRAPER: Login redirect completed successfully!", flush=True)
+                except Exception as e:
+                    print(f"SCRAPER: Login redirect did not complete: {str(e)}", flush=True)
+                    # Wait a bit more as fallback
+                    page.wait_for_timeout(5000)
             else:
                 print("SCRAPER: Already logged in (session active).", flush=True)
                 
@@ -2647,6 +2658,12 @@ class LinkedInScraper:
                 print(f"SCRAPER: Navigated. Status: {response.status if response else 'unknown'}", flush=True)
             except Exception as e:
                 print(f"SCRAPER: Profile navigation error: {str(e)}", flush=True)
+                
+            # Check if we were redirected to a login/signup/checkpoint page
+            final_url = page.url
+            if 'login' in final_url or 'signup' in final_url or 'checkpoint' in final_url:
+                browser.close()
+                raise Exception("LinkedIn redirected to a login, signup, or checkpoint page. This indicates your cookies are invalid, expired, or a security challenge was triggered. Please update linkedin_cookies.json on the server.")
                 
             page.wait_for_timeout(5000)
             
