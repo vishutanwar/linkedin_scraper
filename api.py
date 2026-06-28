@@ -121,6 +121,13 @@ class ScrapeRequest(BaseModel):
         return v
 
 
+class CommentData(BaseModel):
+    """Comment data model."""
+    commenter_name: str
+    commenter_profile_link: str
+    comment_text: str
+
+
 class PostData(BaseModel):
     """Post data model."""
     text: str
@@ -129,6 +136,7 @@ class PostData(BaseModel):
     job_application_link: str
     post_link: str = ""
     image_links: List[str]
+    comments: List[CommentData] = []
 
 
 class ScrapeResponse(BaseModel):
@@ -401,7 +409,9 @@ async def scrape_linkedin_posts(
                 name=post.get('name', ''),
                 profile_link=post.get('profile_link', ''),
                 job_application_link=post.get('job_application_link', ''),
-                image_links=post.get('image_links', [])
+                post_link=post.get('post_link', ''),
+                image_links=post.get('image_links', []),
+                comments=post.get('comments', [])
             ))
         
         return ScrapeResponse(
